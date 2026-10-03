@@ -32,6 +32,11 @@ export class Snap7Backend implements IS7Backend {
 
     this.client = new snap7.S7Client();
 
+    // snap7 connects to 102 unless told otherwise; ConnectTo/SetConnectionParams take no port
+    if (config.port) {
+      this.client.SetParam(this.client.RemotePort, config.port);
+    }
+
     if (config.connectionTimeout) {
       this.client.SetParam(this.client.PingTimeout, config.connectionTimeout);
     }
