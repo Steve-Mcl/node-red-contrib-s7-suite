@@ -105,6 +105,26 @@ export class Poller extends EventEmitter {
       return newValue !== oldVal;
     }
 
-    return newValue !== oldVal;
+    return !sameValue(oldVal, newValue, this.config.deadband);
   }
+}
+
+/**
+ * Whether two reads hold the same value. An array (`DB1,INT0.0.3`), a Buffer or a Date is a new
+ * object on every read, so compare what it holds. Numbers in an array use the deadband too.
+ */
+export function sameValue(a: unknown, b: unknown, deadband = 0): boolean {
+  if (typeof a === 'number' && typeof b === 'number') {
+    return deadband > 0 ? Math.abs(a - b) <= deadband : a === b;
+  }
+  if (Buffer.isBuffer(a) && Buffer.isBuffer(b)) {
+    return a.equals(b);
+  }
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((v, i) => sameValue(v, b[i], deadband));
+  }
+  if (a instanceof Date && b instanceof Date) {
+    return a.getTime() === b.getTime();
+  }
+  return a === b;
 }

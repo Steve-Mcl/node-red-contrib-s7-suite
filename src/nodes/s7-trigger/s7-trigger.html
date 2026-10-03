@@ -115,6 +115,10 @@
   <h4>Deadband</h4>
   <p>For numeric values, the minimum absolute change required to trigger a message.
   Set to 0 to trigger on any change. Useful for filtering noise on analog signals.</p>
+  <h4>Several values in one address</h4>
+  <p>An address with a count (<code>DB1,INT0.0.3</code>, <code>DB1,BYTE0.0.10</code>) triggers when any of its
+  values changes. Each number is checked against the deadband on its own. Rising and falling edges apply to a
+  single boolean only; an array of booleans triggers on any change.</p>
   <h4>Multiple Addresses</h4>
   <p>Enter multiple addresses separated by spaces or semicolons. Each address is
   monitored independently and sends separate messages when changed.</p>

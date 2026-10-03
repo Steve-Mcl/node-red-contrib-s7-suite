@@ -1,10 +1,42 @@
-import { Poller } from '../../../src/core/poller';
+import { Poller, sameValue } from '../../../src/core/poller';
+
+describe('sameValue', () => {
+  it('compares what arrays, Buffers and dates hold, not the objects', () => {
+    expect(sameValue([11, 22, 33], [11, 22, 33])).toBe(true);
+    expect(sameValue([11, 22, 33], [11, 22, 34])).toBe(false);
+    expect(sameValue([1, 2], [1, 2, 3])).toBe(false);
+    expect(sameValue(Buffer.from([1, 2]), Buffer.from([1, 2]))).toBe(true);
+    expect(sameValue(Buffer.from([1, 2]), Buffer.from([1, 3]))).toBe(false);
+    expect(sameValue(new Date(1000), new Date(1000))).toBe(true);
+    expect(sameValue(new Date(1000), new Date(1001))).toBe(false);
+    expect(sameValue([true, false], [true, false])).toBe(true);
+  });
+
+  it('applies the deadband to each number in an array', () => {
+    expect(sameValue([10, 20], [10.4, 19.6], 0.5)).toBe(true);
+    expect(sameValue([10, 20], [10.4, 20.6], 0.5)).toBe(false);
+  });
+});
 
 describe('Poller', () => {
   let poller: Poller;
 
   afterEach(() => {
     if (poller) poller.stop();
+  });
+
+  it('does not report an unchanged array as a change on every poll', async () => {
+    poller = new Poller({ interval: 20, edgeMode: 'any', deadband: 0 });
+    poller.addItem('arr');
+    let reads = 0;
+    // A new array with the same values each time, as a backend returns, then one real change
+    poller.setReadFunction(async () => new Map([['arr', ++reads < 5 ? [11, 22, 33] : [11, 22, 99]]]));
+    const seen: unknown[] = [];
+    poller.on('changed', ({ value }) => seen.push(value));
+    poller.start();
+    await new Promise((r) => setTimeout(r, 200));
+    poller.stop();
+    expect(seen).toEqual([[11, 22, 33], [11, 22, 99]]);
   });
 
   it('emits changed on first read', (done) => {
