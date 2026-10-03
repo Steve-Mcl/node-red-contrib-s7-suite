@@ -1,4 +1,5 @@
-import { NodeS7Backend } from '../../../src/backend/nodes7-backend';
+import { NodeS7Backend, nodes7Unsupported } from '../../../src/backend/nodes7-backend';
+import { parseAddress, toNodes7Address } from '../../../src/core/address-parser';
 
 const mockInitiateConnection = jest.fn();
 const mockDropConnection = jest.fn();
@@ -152,6 +153,40 @@ describe('NodeS7Backend - rawArea and edge cases', () => {
     }])).rejects.toThrow('Not connected');
   });
 
+  it('refuses a write nodes7 would drop, without sending anything', async () => {
+    await expect(backend.write([
+      { name: 'ok', address: { area: 'DB', dbNumber: 1, dataType: 'INT', offset: 0, bitOffset: 0 }, value: 1 },
+      { name: 'u', address: { area: 'DB', dbNumber: 1, dataType: 'UINT', offset: 10, bitOffset: 0 }, value: 5 },
+    ])).rejects.toThrow('"DB1,UINT10" isn\'t supported by the nodes7 backend (nodes7 has no UINT type)');
+
+    expect(mockAddItems).not.toHaveBeenCalled();
+    expect(mockWriteItems).not.toHaveBeenCalled();
+  });
+
+  it('reports an address nodes7 would drop as bad, and still reads the rest', async () => {
+    mockReadAllItems.mockImplementation((cb: Function) => cb(undefined, { 'DB1,INT0': 7 }));
+
+    const results = await backend.read([
+      { name: 'ok', address: { area: 'DB', dbNumber: 1, dataType: 'INT', offset: 0, bitOffset: 0 } },
+      { name: 'u', address: { area: 'DB', dbNumber: 1, dataType: 'UINT', offset: 2, bitOffset: 0 } },
+    ]);
+
+    expect(mockAddItems).toHaveBeenCalledTimes(1);
+    expect(mockAddItems).toHaveBeenCalledWith('DB1,INT0');
+    expect(results[0]).toMatchObject({ value: 7, quality: 'good' });
+    expect(results[1]).toMatchObject({ value: null, quality: 'bad' });
+    expect(results[1].error).toContain('nodes7 has no UINT type');
+  });
+
+  it('does not call nodes7 when no address in a read is supported', async () => {
+    const results = await backend.read([
+      { name: 'u', address: { area: 'DB', dbNumber: 1, dataType: 'USINT', offset: 2, bitOffset: 0 } },
+    ]);
+
+    expect(mockReadAllItems).not.toHaveBeenCalled();
+    expect(results[0].quality).toBe('bad');
+  });
+
   it('connect passes timeout when configured', async () => {
     const backend2 = new NodeS7Backend();
     mockInitiateConnection.mockImplementation((params: Record<string, unknown>, cb: Function) => {
@@ -164,5 +199,42 @@ describe('NodeS7Backend - rawArea and edge cases', () => {
       plcType: 'S7-1200', backend: 'nodes7',
       connectionTimeout: 3000,
     });
+  });
+});
+
+describe('nodes7Unsupported', () => {
+  const via = (address: string): string | undefined => nodes7Unsupported(toNodes7Address(parseAddress(address)));
+
+  it.each([
+    'DB1,INT0', 'DB1,DINT4', 'DB1,WORD0', 'DB1,DWORD0', 'DB1,BYTE0', 'DB1,CHAR0', 'DB1,REAL0', 'DB1,LREAL0',
+    'DB1,LINT0', 'DB1,STRING0.20', 'DB1.DBW0', 'DB1.DBD0', 'DB1.DBB0',
+    'MB0', 'MW0', 'MD0', 'M0.1', 'IB0', 'I0.0', 'QW2', 'Q0.0',
+  ])('accepts %s', (address) => {
+    expect(via(address)).toBeUndefined();
+  });
+
+  it.each([
+    ['DB1,WSTRING0', 'WSTRING'], ['DB1,USINT0', 'USINT'], ['DB1,UINT0', 'UINT'], ['DB1,UDINT0', 'UDINT'],
+    ['DB1,ULINT0', 'ULINT'], ['DB1,DATE0', 'DATE'], ['DB1,TIME0', 'TIME'], ['DB1,TIME_OF_DAY0', 'TIME_OF_DAY'],
+    ['DB1,DATE_AND_TIME0', 'DATE_AND_TIME'], ['DB1,S5TIME0', 'S5TIME'],
+  ])('rejects %s', (address, type) => {
+    expect(via(address)).toContain(`nodes7 has no ${type} type`);
+  });
+
+  it('rejects a STRING with no length', () => {
+    expect(via('DB1,STRING10')).toBe(
+      '"DB1,STRING10" needs the string\'s max length for the nodes7 backend, e.g. "DB1,STRING10.20" for a STRING[20]',
+    );
+  });
+
+  it('rejects counters and timers, which become CW/TW', () => {
+    expect(via('C0')).toContain('"CW0" isn\'t supported by the nodes7 backend');
+    expect(via('T0')).toContain('"TW0" isn\'t supported by the nodes7 backend');
+  });
+
+  it('accepts the nodes7 forms s7-suite does not generate itself', () => {
+    for (const addr of ['DB1,X0.0', 'DB1,S0.20', 'DB1,DTL0', 'MR0', 'EB0', 'AW0', 'PIW256', 'T0', 'C0']) {
+      expect(nodes7Unsupported(addr)).toBeUndefined();
+    }
   });
 });
