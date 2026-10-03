@@ -2,7 +2,9 @@ import { IS7Backend } from './s7-backend.interface';
 import { S7ConnectionConfig } from '../types/s7-connection';
 import { S7ReadItem, S7ReadResult, S7WriteItem, AREA_CODE_MAP } from '../types/s7-address';
 import { S7BlockInfo, S7BlockList, S7BlockType } from '../types/s7-browse';
-import { arrayValues, byteLength, isArrayWrite, readValue, writeValue } from '../core/data-converter';
+import {
+  arrayValues, bitSpan, byteLength, isArrayWrite, readBits, readValue, writeBits, writeValue,
+} from '../core/data-converter';
 import { S7Error, S7ErrorCode } from '../utils/error-codes';
 
 const BLOCK_TYPE_MAP: Record<S7BlockType, number> = {
@@ -113,12 +115,17 @@ export class Snap7Backend implements IS7Backend {
           throw new S7Error(S7ErrorCode.READ_FAILED, `Unsupported area: ${addr.area}`);
         }
         const len = byteLength(addr.dataType, addr.stringLength);
-        const totalLen = addr.arrayLength ? len * addr.arrayLength : len;
+        const bits = addr.dataType === 'BOOL' && addr.arrayLength !== undefined;
+        const totalLen = bits
+          ? bitSpan(addr.bitOffset, addr.arrayLength!)
+          : addr.arrayLength ? len * addr.arrayLength : len;
 
         const buffer = await this.readRawArea(areaCode, addr.dbNumber, addr.offset, totalLen);
 
         let value: unknown;
-        if (addr.arrayLength) {
+        if (bits) {
+          value = readBits(buffer, addr.bitOffset, addr.arrayLength!);
+        } else if (addr.arrayLength) {
           const arr: unknown[] = [];
           for (let i = 0; i < addr.arrayLength; i++) {
             arr.push(readValue(buffer, i * len, addr.dataType, addr.bitOffset));
@@ -165,14 +172,12 @@ export class Snap7Backend implements IS7Backend {
       const where = `${addr.area === 'DB' ? `DB${addr.dbNumber}` : addr.area} offset ${addr.offset}`;
 
       if (addr.dataType === 'BOOL') {
-        if ((addr.arrayLength ?? 1) > 1) {
-          throw new S7Error(S7ErrorCode.WRITE_FAILED, `Writing several bits at once isn't supported yet (${where})`);
-        }
-        const value = addr.arrayLength ? arrayValues('BOOL', item.value, 1, where)[0] : item.value;
-        // Read-modify-write for booleans
-        const buf = await this.readRawArea(areaCode, addr.dbNumber, addr.offset, 1);
-        writeValue(buf, 0, 'BOOL', value, addr.bitOffset);
-        await this.writeRawArea(areaCode, addr.dbNumber, addr.offset, 1, buf);
+        // Read-modify-write, so the other bits in those bytes are kept
+        const values = addr.arrayLength ? arrayValues('BOOL', item.value, addr.arrayLength, where) : [item.value];
+        const span = bitSpan(addr.bitOffset, values.length);
+        const buf = await this.readRawArea(areaCode, addr.dbNumber, addr.offset, span);
+        writeBits(buf, addr.bitOffset, values);
+        await this.writeRawArea(areaCode, addr.dbNumber, addr.offset, span, buf);
       } else if (isArrayWrite(addr)) {
         const values = arrayValues(addr.dataType, item.value, addr.arrayLength!, where);
         const buf = Buffer.alloc(len * values.length);

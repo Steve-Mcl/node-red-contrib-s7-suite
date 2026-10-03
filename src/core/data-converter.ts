@@ -145,6 +145,31 @@ export function readValue(buffer: Buffer, offset: number, dataType: S7DataType, 
 }
 
 /**
+ * Several bits (`DB1,BOOL10.3.8`) are packed, as in a PLC `Array of Bool`: consecutive bits from the
+ * bit offset, running on into the next bytes. This is how many bytes they span.
+ */
+export function bitSpan(bitOffset: number, count: number): number {
+  return Math.ceil((bitOffset + count) / 8);
+}
+
+/** Reads `count` consecutive bits starting at `bitOffset` of the buffer's first byte. */
+export function readBits(buffer: Buffer, bitOffset: number, count: number): boolean[] {
+  return Array.from({ length: count }, (_, i) => {
+    const bit = bitOffset + i;
+    return (buffer[bit >> 3] & (1 << (bit & 7))) !== 0;
+  });
+}
+
+/** Sets consecutive bits from `bitOffset`, leaving the other bits of those bytes as they are. */
+export function writeBits(buffer: Buffer, bitOffset: number, values: unknown[]): void {
+  values.forEach((v, i) => {
+    const bit = bitOffset + i;
+    if (v) buffer[bit >> 3] |= 1 << (bit & 7);
+    else buffer[bit >> 3] &= ~(1 << (bit & 7));
+  });
+}
+
+/**
  * Whether a write goes to several values (`DB1,BYTE0.0.4`). A STRING's suffix is its length, not a
  * count, so strings are never array writes.
  */
@@ -158,6 +183,9 @@ export function isArrayWrite(addr: S7Address): boolean {
  * produces. Anything else is refused rather than written as a single value.
  */
 export function arrayValues(dataType: S7DataType, value: unknown, count: number, where: string): unknown[] {
+  if (Buffer.isBuffer(value) && dataType === 'BOOL') {
+    throw new S7Error(S7ErrorCode.WRITE_FAILED, `${where} takes ${count} bits as an array of booleans, not a Buffer`);
+  }
   if (Buffer.isBuffer(value)) {
     const size = byteLength(dataType);
     if (value.length !== count * size) {

@@ -2,7 +2,9 @@ import { IS7Backend } from './s7-backend.interface';
 import { S7ConnectionConfig } from '../types/s7-connection';
 import { S7ReadItem, S7ReadResult, S7WriteItem } from '../types/s7-address';
 import { S7BlockInfo, S7BlockList, S7BlockType } from '../types/s7-browse';
-import { arrayValues, byteLength, isArrayWrite, readValue, writeValue } from '../core/data-converter';
+import {
+  arrayValues, bitSpan, byteLength, isArrayWrite, readBits, readValue, writeBits, writeValue,
+} from '../core/data-converter';
 
 export class SimBackend implements IS7Backend {
   private connected = false;
@@ -71,8 +73,10 @@ export class SimBackend implements IS7Backend {
 
         const len = byteLength(addr.dataType, addr.stringLength);
         // Several values (DB1,INT0.0.3) come back as an array, as on the other backends
-        const count = isArrayWrite(addr) && addr.dataType !== 'BOOL' ? addr.arrayLength! : 0;
-        if (addr.offset + len * Math.max(count, 1) > buf.length) {
+        const count = isArrayWrite(addr) ? addr.arrayLength! : 0;
+        const bits = addr.dataType === 'BOOL' && count > 0;
+        const span = bits ? bitSpan(addr.bitOffset, count) : len * Math.max(count, 1);
+        if (addr.offset + span > buf.length) {
           return {
             name: item.name, address: addr, value: null,
             quality: 'bad' as const, timestamp: Date.now(),
@@ -80,9 +84,11 @@ export class SimBackend implements IS7Backend {
           };
         }
 
-        const value = count
-          ? Array.from({ length: count }, (_, i) => readValue(buf, addr.offset + i * len, addr.dataType))
-          : readValue(buf, addr.offset, addr.dataType, addr.bitOffset);
+        const value = bits
+          ? readBits(buf.subarray(addr.offset), addr.bitOffset, count)
+          : count
+            ? Array.from({ length: count }, (_, i) => readValue(buf, addr.offset + i * len, addr.dataType))
+            : readValue(buf, addr.offset, addr.dataType, addr.bitOffset);
 
         return {
           name: item.name, address: addr, value,
@@ -114,11 +120,11 @@ export class SimBackend implements IS7Backend {
 
       const where = `${key} offset ${addr.offset}`;
       if (addr.dataType === 'BOOL') {
-        if (count > 1) {
-          throw new Error(`Writing several bits at once isn't supported yet (${where})`);
+        const values = addr.arrayLength ? arrayValues('BOOL', item.value, count, where) : [item.value];
+        if (addr.offset + bitSpan(addr.bitOffset, values.length) > buf.length) {
+          throw new Error(`Offset ${addr.offset} out of range (area size: ${buf.length})`);
         }
-        const value = addr.arrayLength ? arrayValues('BOOL', item.value, 1, where)[0] : item.value;
-        writeValue(buf, addr.offset, 'BOOL', value, addr.bitOffset);
+        writeBits(buf.subarray(addr.offset), addr.bitOffset, values);
       } else if (isArrayWrite(addr)) {
         const len = byteLength(addr.dataType);
         const values = arrayValues(addr.dataType, item.value, count, where);

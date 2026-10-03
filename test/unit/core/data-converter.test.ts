@@ -1,4 +1,4 @@
-import { arrayValues, byteLength, isArrayWrite, readValue, writeValue } from '../../../src/core/data-converter';
+import { arrayValues, bitSpan, byteLength, isArrayWrite, readBits, readValue, writeBits, writeValue } from '../../../src/core/data-converter';
 import { S7Error } from '../../../src/utils/error-codes';
 
 describe('data-converter', () => {
@@ -261,8 +261,29 @@ describe('data-converter', () => {
     });
   });
 
-  describe('arrayValues', () => {
-    it('takes an array of the right length as it is', () => {
+  describe('packed bits', () => {
+    it('spans the bytes the bits run into', () => {
+      expect(bitSpan(0, 8)).toBe(1);
+      expect(bitSpan(3, 8)).toBe(2);
+      expect(bitSpan(7, 1)).toBe(1);
+      expect(bitSpan(7, 2)).toBe(2);
+    });
+
+    it('reads consecutive bits from the bit offset', () => {
+      expect(readBits(Buffer.from([0xf8, 0x07]), 3, 8)).toEqual(Array(8).fill(true));
+      expect(readBits(Buffer.from([0b00000101]), 0, 3)).toEqual([true, false, true]);
+    });
+
+    it('writes consecutive bits and keeps the others', () => {
+      const buf = Buffer.from([0x01, 0x80]);
+      writeBits(buf, 3, Array(8).fill(true));
+      expect([...buf]).toEqual([0xf9, 0x87]);
+      writeBits(buf, 3, Array(8).fill(false));
+      expect([...buf]).toEqual([0x01, 0x80]);
+    });
+  });
+
+  describe('arrayValues', () => {    it('takes an array of the right length as it is', () => {
       expect(arrayValues('INT', [1, 2, 3], 3, 'DB1 offset 0')).toEqual([1, 2, 3]);
     });
 

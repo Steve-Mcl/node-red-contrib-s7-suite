@@ -227,6 +227,8 @@ describe('address-parser', () => {
         bitOffset: 1,
       };
       expect(toNodes7Address(addr)).toBe('M0.1');
+      // A count of bits goes to nodes7 too: M10.3.8 is 8 consecutive bits
+      expect(toNodes7Address(parseAddress('M10.3.8'))).toBe('M10.3.8');
     });
 
     it('converts MB address', () => {

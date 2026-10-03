@@ -235,6 +235,9 @@
     <li><b>IEC:</b> <code>DB1.DBD0</code>, <code>DB1.DBX0.0</code>, <code>DB1.DBW4</code></li>
     <li><b>Area:</b> <code>MW0</code>, <code>Q0.0</code>, <code>IB2</code></li>
     <li><b>Several values:</b> <code>DB1,BYTE10.0.4</code> (4 bytes from offset 10), <code>MW0.0.3</code> (3 words)</li>
+    <li><b>Several bits:</b> <code>DB1,BOOL10.3.8</code> or <code>M10.3.8</code> is 8 consecutive bits from bit 3 of
+      byte 10, running on into byte 11, as in a PLC <code>Array of Bool</code>. Send an array of booleans; the other
+      bits in those bytes are left as they are.</li>
   </ul>
   <h4>Data Type Mapping</h4>
   <ul>

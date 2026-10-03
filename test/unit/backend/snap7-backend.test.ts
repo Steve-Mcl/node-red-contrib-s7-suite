@@ -232,6 +232,20 @@ describe('Snap7Backend', () => {
       expect(results[0].value).toEqual([10, 20, 30]);
     });
 
+    it('reads several bits as packed bits running into the next byte', async () => {
+      // Bits 3 to 10 set: byte 10 = 0xF8, byte 11 = 0x07
+      mockReadArea.mockImplementation(
+        (_a: unknown, _d: unknown, _s: unknown, _l: unknown, _w: unknown, cb: Function) => cb(undefined, Buffer.from([0xf8, 0x07])),
+      );
+
+      const results = await backend.read([
+        { name: 'bits', address: { area: 'M', dbNumber: 0, dataType: 'BOOL', offset: 10, bitOffset: 3, arrayLength: 8 } },
+      ]);
+
+      expect(mockReadArea).toHaveBeenCalledWith(0x83, 0, 10, 2, 0x02, expect.any(Function));
+      expect(results[0].value).toEqual(Array(8).fill(true));
+    });
+
     it('reads from M area', async () => {
       const buf = Buffer.alloc(2);
       buf.writeInt16BE(42, 0);
@@ -289,6 +303,28 @@ describe('Snap7Backend', () => {
       const [, , start, length, , first] = mockWriteArea.mock.calls[0];
       expect([start, length, [...first]]).toEqual([10, 4, [1, 2, 3, 4]]);
       expect([...mockWriteArea.mock.calls[1][5]]).toEqual([5, 6, 7, 8]);
+    });
+
+    it('writes several bits as packed bits with a read-modify-write of the bytes they span', async () => {
+      mockReadArea.mockImplementation(
+        (_a: unknown, _d: unknown, _s: unknown, _l: unknown, _w: unknown, cb: Function) => cb(undefined, Buffer.from([0x01, 0x80])),
+      );
+      mockWriteArea.mockImplementation(
+        (_a: unknown, _d: unknown, _s: unknown, _l: unknown, _w: unknown, _b: unknown, cb: Function) => cb(),
+      );
+      const address = { area: 'DB' as const, dbNumber: 1, dataType: 'BOOL' as const, offset: 10, bitOffset: 3, arrayLength: 8 };
+
+      await backend.write([{ name: 'b', address, value: Array(8).fill(true) }]);
+
+      expect(mockReadArea).toHaveBeenCalledWith(0x84, 1, 10, 2, 0x02, expect.any(Function));
+      const [, , start, length, , buf] = mockWriteArea.mock.calls[0];
+      expect([start, length, [...buf]]).toEqual([10, 2, [0xf9, 0x87]]);
+    });
+
+    it('refuses a Buffer for several bits', async () => {
+      const address = { area: 'DB' as const, dbNumber: 1, dataType: 'BOOL' as const, offset: 10, bitOffset: 0, arrayLength: 8 };
+      await expect(backend.write([{ name: 'b', address, value: Buffer.alloc(8) }]))
+        .rejects.toThrow('takes 8 bits as an array of booleans, not a Buffer');
     });
 
     it('refuses several values of the wrong length without writing', async () => {

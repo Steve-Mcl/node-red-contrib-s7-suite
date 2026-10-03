@@ -207,7 +207,9 @@ export function toNodes7Address(addr: S7Address): string {
 
   const prefix = addr.area;
   if (addr.dataType === 'BOOL') {
-    return `${prefix}${addr.offset}.${addr.bitOffset}`;
+    // Keep a count: M10.3.8 is 8 consecutive bits to nodes7
+    const count = addr.arrayLength !== undefined ? `.${addr.arrayLength}` : '';
+    return `${prefix}${addr.offset}.${addr.bitOffset}${count}`;
   }
 
   const sizeMap: Partial<Record<S7DataType, string>> = {
