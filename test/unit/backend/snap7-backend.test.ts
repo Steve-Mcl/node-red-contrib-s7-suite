@@ -13,10 +13,12 @@ const mockListBlocksOfType = jest.fn();
 const mockGetAgBlockInfo = jest.fn();
 const mockReadSZL = jest.fn();
 const mockErrorText = jest.fn();
+const mockPlcStatus = jest.fn();
 
 jest.mock('node-snap7', () => ({
   S7Client: jest.fn().mockImplementation(() => ({
     ErrorText: mockErrorText,
+    PlcStatus: mockPlcStatus,
     Connect: mockConnect,
     ConnectTo: mockConnectTo,
     Disconnect: mockDisconnect,
@@ -535,6 +537,68 @@ describe('Snap7Backend', () => {
       );
 
       await expect(backend.readRawArea(0x84, 1, 0, 4)).rejects.toThrow('snap7 read failed');
+    });
+  });
+
+  describe('connection loss', () => {
+    // Codes seen from node-snap7 against a snap7 server
+    const LINK_RESET = 0x92746; // "ISO : An error occurred during send TCP : Connection reset by peer"
+    const OUT_OF_RANGE = 0x00900000; // "CPU : Address out of range"
+    const item = { name: 'x', address: { area: 'DB' as const, dbNumber: 1, dataType: 'REAL' as const, offset: 4, bitOffset: 0 } };
+
+    beforeEach(async () => {
+      mockErrorText.mockImplementation((code: number) => (code === LINK_RESET ? 'ISO : link gone' : 'CPU : Address out of range'));
+      mockConnectTo.mockImplementation((_h: unknown, _r: unknown, _s: unknown, cb: Function) => cb());
+      await backend.connect({ host: '192.168.1.100', port: 102, rack: 0, slot: 1, plcType: 'S7-1200', backend: 'snap7' });
+    });
+
+    it('fails the whole read with DISCONNECTED on a TCP/ISO error and marks the link down', async () => {
+      mockReadArea.mockImplementation(
+        (_a: unknown, _d: unknown, _s: unknown, _l: unknown, _w: unknown, cb: Function) => cb(LINK_RESET),
+      );
+
+      await expect(backend.read([item])).rejects.toMatchObject({ code: 'DISCONNECTED' });
+      expect(backend.isConnected()).toBe(false);
+    });
+
+    it('keeps a PLC-level error per item and stays connected', async () => {
+      mockReadArea.mockImplementation(
+        (_a: unknown, _d: unknown, _s: unknown, _l: unknown, _w: unknown, cb: Function) => cb(OUT_OF_RANGE),
+      );
+
+      const [result] = await backend.read([item]);
+      expect(result.quality).toBe('bad');
+      expect(backend.isConnected()).toBe(true);
+    });
+
+    it('reports a write on a lost link as DISCONNECTED', async () => {
+      mockWriteArea.mockImplementation(
+        (_a: unknown, _d: unknown, _s: unknown, _l: unknown, _w: unknown, _b: unknown, cb: Function) => cb(LINK_RESET),
+      );
+
+      await expect(backend.write([{ ...item, value: 1.5 }])).rejects.toMatchObject({ code: 'DISCONNECTED' });
+    });
+
+    it('ping() resolves while the CPU answers PlcStatus', async () => {
+      mockPlcStatus.mockImplementation((cb: Function) => cb(null, 8));
+      await expect(backend.ping()).resolves.toBeUndefined();
+    });
+
+    it('ping() rejects with DISCONNECTED when the link is gone', async () => {
+      mockPlcStatus.mockImplementation((cb: Function) => cb(LINK_RESET));
+      await expect(backend.ping()).rejects.toMatchObject({ code: 'DISCONNECTED' });
+      expect(backend.isConnected()).toBe(false);
+    });
+
+    it('ping() does not mark the link down when the CPU rejects the request itself', async () => {
+      mockPlcStatus.mockImplementation((cb: Function) => cb(OUT_OF_RANGE));
+      await expect(backend.ping()).rejects.toMatchObject({ code: 'READ_FAILED' });
+      expect(backend.isConnected()).toBe(true);
+    });
+
+    it('disconnects the old client before reconnecting', async () => {
+      await backend.connect({ host: '192.168.1.100', port: 102, rack: 0, slot: 1, plcType: 'S7-1200', backend: 'snap7' });
+      expect(mockDisconnect).toHaveBeenCalledTimes(1);
     });
   });
 });

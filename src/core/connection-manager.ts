@@ -20,6 +20,9 @@ export class ConnectionManager extends EventEmitter {
   private processing = false;
   private maxQueueSize = 100;
   private manualDisconnect = false;
+  private healthTimer: ReturnType<typeof setInterval> | null = null;
+  private healthCheckInterval: number;
+  private lastActivity = 0;
 
   constructor(backend: IS7Backend, config: S7ConnectionConfig, maxQueueSize = 100) {
     super();
@@ -28,6 +31,7 @@ export class ConnectionManager extends EventEmitter {
     this.config = config;
     this.maxQueueSize = maxQueueSize;
     this.reconnectDelay = config.reconnectInterval ?? 1000;
+    this.healthCheckInterval = config.healthCheckInterval ?? 2000;
   }
 
   /** Returns the current connection state. */
@@ -59,9 +63,9 @@ export class ConnectionManager extends EventEmitter {
     this.clearReconnectTimer();
     this.rejectPendingQueue();
 
-    if (this.backend.isConnected()) {
-      await this.backend.disconnect();
-    }
+    // Always let the backend clean up: after a lost link isConnected() is false, but the
+    // library may still hold a socket or its own reconnect timers.
+    await this.backend.disconnect();
     this.setState('disconnected');
   }
 
@@ -117,6 +121,7 @@ export class ConnectionManager extends EventEmitter {
             timeoutHandle = setTimeout(() => reject(new S7Error(S7ErrorCode.REQUEST_TIMEOUT, 'Request timed out')), timeoutMs);
           }),
         ]);
+        this.lastActivity = Date.now();
         entry.resolve(result);
       } catch (err) {
         entry.reject(err);
@@ -183,8 +188,51 @@ export class ConnectionManager extends EventEmitter {
   private setState(newState: ConnectionState): void {
     const oldState = this.state;
     this.state = newState;
+    if (newState === 'connected') {
+      this.startHealthCheck();
+    } else {
+      this.stopHealthCheck();
+    }
     if (oldState !== newState) {
       this.emit('stateChanged', { oldState, newState });
+    }
+  }
+
+  /**
+   * While connected and idle, check the link every healthCheckInterval ms so a lost PLC shows
+   * up without waiting for the next read or write. Any successful request counts as a check.
+   */
+  private startHealthCheck(): void {
+    if (this.healthCheckInterval <= 0 || this.healthTimer) return;
+    this.lastActivity = Date.now();
+    this.healthTimer = setInterval(() => this.checkHealth(), this.healthCheckInterval);
+    this.healthTimer.unref?.();
+  }
+
+  private stopHealthCheck(): void {
+    if (this.healthTimer) {
+      clearInterval(this.healthTimer);
+      this.healthTimer = null;
+    }
+  }
+
+  private checkHealth(): void {
+    if (this.state !== 'connected') return;
+
+    // Free check (no traffic), so run it every tick
+    if (!this.backend.isConnected()) {
+      this.handleConnectionLoss();
+      return;
+    }
+
+    // Only ping when idle; a recent successful request already proves the link
+    if (this.processing || this.queue.length > 0) return;
+    if (Date.now() - this.lastActivity < this.healthCheckInterval) return;
+    if (this.backend.ping) {
+      // Goes through the queue like any request; a connection-class failure triggers the
+      // usual reconnect in processQueue(). Other failures (e.g. a PLC that rejects the
+      // status request) are ignored.
+      this.enqueue(() => this.backend.ping!()).catch(() => undefined);
     }
   }
 

@@ -24,6 +24,11 @@ export interface S7ConnectionConfig {
   reconnectInterval?: number;
   maxReconnectInterval?: number;
   /**
+   * How often (ms) to check the link while connected and idle, so a lost PLC is noticed without
+   * waiting for the next request. Defaults to 2000; 0 disables the check.
+   */
+  healthCheckInterval?: number;
+  /**
    * When true, enables verbose backend protocol logging (nodes7 trace output).
    * Defaults to false so normal poll/read traffic is not logged to stdout.
    */
