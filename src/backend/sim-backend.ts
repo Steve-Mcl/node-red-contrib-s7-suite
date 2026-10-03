@@ -2,15 +2,17 @@ import { IS7Backend } from './s7-backend.interface';
 import { S7ConnectionConfig } from '../types/s7-connection';
 import { S7ReadItem, S7ReadResult, S7WriteItem } from '../types/s7-address';
 import { S7BlockInfo, S7BlockList, S7BlockType } from '../types/s7-browse';
-import { byteLength, readValue, writeValue } from '../core/data-converter';
+import { byteLength, readValue, ReadOptions, writeValue } from '../core/data-converter';
 
 export class SimBackend implements IS7Backend {
   private connected = false;
+  private readOptions: ReadOptions = {};
   private memory: Map<string, Buffer> = new Map();
   private startTime = Date.now();
   private counter = 0;
 
-  async connect(_config: S7ConnectionConfig): Promise<void> {
+  async connect(config: S7ConnectionConfig): Promise<void> {
+    this.readOptions = { int64: config.int64As };
     // Initialize simulated DB1 with 100 bytes
     this.initArea('DB:1', 100);
     // Initialize Merker, Input, Output areas
@@ -78,7 +80,7 @@ export class SimBackend implements IS7Backend {
           };
         }
 
-        const value = readValue(buf, addr.offset, addr.dataType, addr.bitOffset);
+        const value = readValue(buf, addr.offset, addr.dataType, addr.bitOffset, this.readOptions);
 
         return {
           name: item.name, address: addr, value,

@@ -285,7 +285,7 @@
       });
 
       // Schema editableList for struct mode
-      var S7_TYPES = ['BOOL','BYTE','WORD','DWORD','INT','DINT','REAL','LREAL','CHAR','STRING'];
+      var S7_TYPES = ['BOOL','BYTE','WORD','DWORD','INT','DINT','LINT','USINT','UINT','UDINT','ULINT','REAL','LREAL','CHAR','STRING','WSTRING','DATE','TIME','TIME_OF_DAY','S5TIME','DATE_AND_TIME','DT','DTZ','DTL','DTLZ'];
       var schemaList = $('#s7r-schema-list').css({ 'min-height': '250px', 'min-width': '300px' }).editableList({
         addButton: 'Add field',
         removable: true,
@@ -304,7 +304,7 @@
           function updateVisibility() {
             var t = typeSelect.val();
             bitInput.toggle(t === 'BOOL');
-            lenInput.toggle(t === 'STRING');
+            lenInput.toggle(t === 'STRING' || t === 'WSTRING');
           }
           typeSelect.on('change', updateVisibility);
 
@@ -397,7 +397,7 @@
           if (name && !isNaN(offset)) {
             var field = { name: name, type: type, offset: offset };
             if (type === 'BOOL' && bit !== '') field.bit = parseInt(bit, 10);
-            if (type === 'STRING' && len !== '') field.length = parseInt(len, 10);
+            if ((type === 'STRING' || type === 'WSTRING') && len !== '') field.length = parseInt(len, 10);
             schema.push(field);
           }
         });
@@ -518,4 +518,12 @@
     <dt>Bit Array</dt>
     <dd>Reads N bytes and returns an array of booleans (LSB first per byte). Address format: <code>DB1,BYTE0.0.2</code> (2 bytes = 16 bits). Useful for status words and bitmasks.</dd>
   </dl>
+  <h3>Dates and times</h3>
+  <p>Use <b>DT</b> for a <code>DATE_AND_TIME</code> in the PLC (8 bytes, milliseconds, 1990 to 2089) and
+  <b>DTL</b> for a <code>DTL</code> (12 bytes, S7-1200/1500 only, 1970 to 2262). Both are read as a JavaScript
+  <code>Date</code>. The debug sidebar shows a Date as its ISO string, in UTC.</p>
+  <p>The PLC stores a date without a time zone. <b>DT</b> and <b>DTL</b> treat it as local time on the
+  Node-RED server, so use them when the PLC holds its local clock. <b>DTZ</b> and <b>DTLZ</b> read the same
+  bytes as UTC, for a PLC that keeps UTC (for example the S7-1500 system time). The wrong choice puts every
+  value off by the server's UTC offset. <b>DATE_AND_TIME</b> is the same as DTZ but returns an ISO string.</p>
 </script>

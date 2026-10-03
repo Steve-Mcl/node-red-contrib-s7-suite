@@ -410,8 +410,8 @@ describe('data-converter', () => {
       expect(buf.readUInt8(4)).toBe(0x30); // minute
       expect(buf.readUInt8(5)).toBe(0x45); // second
       expect(buf.readUInt8(6)).toBe(0x12); // ms high (12 BCD)
-      // ms low = 3, dow = Friday = 5
-      expect(buf.readUInt8(7)).toBe(0x35);
+      // ms low = 3, weekday = Friday = 6 (S7 counts 1 = Sunday)
+      expect(buf.readUInt8(7)).toBe(0x36);
     });
 
     it('writes DATE_AND_TIME for year >= 2000', () => {
@@ -478,6 +478,130 @@ describe('data-converter', () => {
     it('throws S7Error on buffer too small for WSTRING write', () => {
       const buf = Buffer.alloc(2); // need at least 4 for WSTRING header
       expect(() => writeValue(buf, 0, 'WSTRING', 'test')).toThrow(S7Error);
+    });
+  });
+
+  describe('LINT/ULINT beyond 2^53', () => {
+    const big = 9007199254740993n; // 2^53 + 1, not representable as a JS number
+
+    it('reads as a number by default, losing precision', () => {
+      const buf = Buffer.alloc(8);
+      buf.writeBigInt64BE(big);
+      expect(readValue(buf, 0, 'LINT')).toBe(9007199254740992);
+    });
+
+    it('reads exactly as a BigInt or a string when asked', () => {
+      const buf = Buffer.alloc(8);
+      buf.writeBigUInt64BE(2n ** 64n - 1n);
+      expect(readValue(buf, 0, 'ULINT', 0, { int64: 'bigint' })).toBe(2n ** 64n - 1n);
+      expect(readValue(buf, 0, 'ULINT', 0, { int64: 'string' })).toBe('18446744073709551615');
+      buf.writeBigInt64BE(-big);
+      expect(readValue(buf, 0, 'LINT', 0, { int64: 'string' })).toBe('-9007199254740993');
+    });
+
+    it('writes a BigInt or an integer string exactly', () => {
+      const buf = Buffer.alloc(8);
+      writeValue(buf, 0, 'LINT', big);
+      expect(buf.readBigInt64BE(0)).toBe(big);
+      writeValue(buf, 0, 'ULINT', ' 18446744073709551615 ');
+      expect(buf.readBigUInt64BE(0)).toBe(2n ** 64n - 1n);
+      writeValue(buf, 0, 'LINT', '-9223372036854775808');
+      expect(buf.readBigInt64BE(0)).toBe(-(2n ** 63n));
+    });
+
+    it('still rounds a plain number, as before', () => {
+      const buf = Buffer.alloc(8);
+      writeValue(buf, 0, 'LINT', 12.6);
+      expect(buf.readBigInt64BE(0)).toBe(13n);
+    });
+
+    it('rejects values out of range or not a number', () => {
+      const buf = Buffer.alloc(8);
+      expect(() => writeValue(buf, 0, 'ULINT', -1)).toThrow('-1 is out of range for ULINT');
+      expect(() => writeValue(buf, 0, 'LINT', 2n ** 63n)).toThrow('out of range for LINT');
+      expect(() => writeValue(buf, 0, 'LINT', 'abc')).toThrow('LINT needs an integer; got abc');
+    });
+  });
+
+  describe('DT, DTZ, DTL, DTLZ', () => {
+    // Sunday 2024-03-17 10:30:45.123 UTC
+    const when = new Date('2024-03-17T10:30:45.123Z');
+
+    it('has the right sizes', () => {
+      expect(byteLength('DT')).toBe(8);
+      expect(byteLength('DTZ')).toBe(8);
+      expect(byteLength('DTL')).toBe(12);
+      expect(byteLength('DTLZ')).toBe(12);
+    });
+
+    it('writes DTZ as BCD in UTC, with Sunday as weekday 1', () => {
+      const buf = Buffer.alloc(8);
+      writeValue(buf, 0, 'DTZ', when);
+      expect([...buf]).toEqual([0x24, 0x03, 0x17, 0x10, 0x30, 0x45, 0x12, 0x31]);
+    });
+
+    it('writes DTLZ in UTC, with nanoseconds', () => {
+      const buf = Buffer.alloc(12);
+      writeValue(buf, 0, 'DTLZ', when);
+      expect(buf.readUInt16BE(0)).toBe(2024);
+      expect([...buf.subarray(2, 8)]).toEqual([3, 17, 1, 10, 30, 45]);
+      expect(buf.readUInt32BE(8)).toBe(123_000_000);
+    });
+
+    it('reads DTZ and DTLZ back as the same Date', () => {
+      for (const type of ['DTZ', 'DTLZ'] as const) {
+        const buf = Buffer.alloc(byteLength(type));
+        writeValue(buf, 0, type, when);
+        const back = readValue(buf, 0, type);
+        expect(back).toBeInstanceOf(Date);
+        expect((back as Date).getTime()).toBe(when.getTime());
+      }
+    });
+
+    it('writes DT and DTL in the server\'s local time', () => {
+      const dt = Buffer.alloc(8);
+      writeValue(dt, 0, 'DT', when);
+      expect(dt[3]).toBe(parseInt(String(when.getHours()), 16)); // BCD hour, local
+      expect(dt[7] & 0x0f).toBe(when.getDay() + 1);
+      const dtl = Buffer.alloc(12);
+      writeValue(dtl, 0, 'DTL', when);
+      expect(dtl[5]).toBe(when.getHours());
+      expect(dtl[3]).toBe(when.getDate());
+    });
+
+    it('reads DT and DTL back as the same Date', () => {
+      for (const type of ['DT', 'DTL'] as const) {
+        const buf = Buffer.alloc(byteLength(type));
+        writeValue(buf, 0, type, when);
+        expect((readValue(buf, 0, type) as Date).getTime()).toBe(when.getTime());
+      }
+    });
+
+    it('accepts an ISO string or milliseconds since 1970', () => {
+      const a = Buffer.alloc(12);
+      const b = Buffer.alloc(12);
+      writeValue(a, 0, 'DTLZ', when.toISOString());
+      writeValue(b, 0, 'DTLZ', when.getTime());
+      expect(a).toEqual(b);
+    });
+
+    it('rejects something that is not a date', () => {
+      expect(() => writeValue(Buffer.alloc(8), 0, 'DT', 'tomorrow')).toThrow('DT needs a date');
+    });
+
+    it('rejects years the type cannot hold', () => {
+      expect(() => writeValue(Buffer.alloc(8), 0, 'DTZ', '1989-12-31T23:59:59Z')).toThrow('DTZ holds years 1990 to 2089; got 1989');
+      expect(() => writeValue(Buffer.alloc(8), 0, 'DATE_AND_TIME', '2090-01-01T00:00:00Z')).toThrow('holds years 1990 to 2089');
+      expect(() => writeValue(Buffer.alloc(12), 0, 'DTLZ', '1969-12-31T23:59:59Z')).toThrow('DTLZ holds years 1970 to 2262');
+    });
+
+    it('keeps DATE_AND_TIME as an ISO string, laid out like DTZ', () => {
+      const a = Buffer.alloc(8);
+      const b = Buffer.alloc(8);
+      writeValue(a, 0, 'DATE_AND_TIME', when);
+      writeValue(b, 0, 'DTZ', when);
+      expect(a).toEqual(b);
+      expect(readValue(a, 0, 'DATE_AND_TIME')).toBe('2024-03-17T10:30:45.123Z');
     });
   });
 });

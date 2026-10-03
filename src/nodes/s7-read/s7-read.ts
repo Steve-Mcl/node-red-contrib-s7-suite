@@ -112,7 +112,7 @@ export = function (RED: NodeAPI): void {
           const validTypes: Set<string> = new Set([
             'BOOL', 'BYTE', 'WORD', 'DWORD', 'INT', 'DINT', 'REAL', 'LREAL', 'CHAR', 'STRING',
             'USINT', 'UINT', 'UDINT', 'LINT', 'ULINT',
-            'DATE', 'TIME', 'TIME_OF_DAY', 'DATE_AND_TIME', 'S5TIME',
+            'DATE', 'TIME', 'TIME_OF_DAY', 'DATE_AND_TIME', 'DT', 'DTZ', 'DTL', 'DTLZ', 'S5TIME',
             'WSTRING',
           ]);
           for (const field of schema) {
@@ -150,7 +150,9 @@ export = function (RED: NodeAPI): void {
 
           const result: Record<string, unknown> = {};
           for (const field of schema) {
-            result[field.name] = readValue(buffer, field.offset, field.type, field.bit ?? 0);
+            result[field.name] = readValue(buffer, field.offset, field.type, field.bit ?? 0, {
+              int64: serverNode.s7Config?.int64As,
+            });
           }
 
           send({ ...msg, payload: result } as NodeMessage);

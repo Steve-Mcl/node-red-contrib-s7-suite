@@ -183,7 +183,8 @@
       requestTimeout: { value: 3000, validate: RED.validators.number() },
       reconnectInterval: { value: 1000, validate: RED.validators.number() },
       maxReconnectInterval: { value: 30000, validate: RED.validators.number() },
-      debug: { value: false }
+      debug: { value: false },
+      int64As: { value: 'number' }
     },
     credentials: {
       password: { type: 'password' }
@@ -192,6 +193,10 @@
       return this.name || this.host + ':' + this.port;
     },
     oneditprepare: function () {
+      // Configs saved before this setting existed have none; the runtime treats that as 'number'
+      if (!this.int64As) {
+        $('#node-config-input-int64As').val('number');
+      }
       var plcDefaults = {};
       $.getJSON('s7-suite/plc-defaults', function (data) {
         plcDefaults = data;
@@ -315,6 +320,14 @@
     <input type="number" id="node-config-input-maxReconnectInterval" placeholder="30000">
   </div>
   <div class="form-row">
+    <label for="node-config-input-int64As"><i class="fa fa-hashtag"></i> LINT/ULINT as</label>
+    <select id="node-config-input-int64As">
+      <option value="number">Number (exact up to 2^53)</option>
+      <option value="bigint">BigInt (exact)</option>
+      <option value="string">String (exact)</option>
+    </select>
+  </div>
+  <div class="form-row">
     <label for="node-config-input-debug" style="width:auto;"><i class="fa fa-bug"></i> Debug logging</label>
     <input type="checkbox" id="node-config-input-debug" style="display:inline-block; width:auto; vertical-align:top;">
     <span style="color:#888; font-size:0.85em;">Logs raw protocol traffic (nodes7) to stdout. Leave off for normal use.</span>
@@ -335,6 +348,14 @@
     <dd>S7-200, S7-300, S7-400, S7-1200, S7-1500, or LOGO</dd>
     <dt>Backend <span class="property-type">select</span></dt>
     <dd>Communication library to use</dd>
+    <dt>LINT/ULINT as <span class="property-type">select</span></dt>
+    <dd>How 64-bit integers are returned. <b>Number</b> (the default) is exact up to 2^53
+    (9007199254740991) and loses precision above that. <b>BigInt</b> is always exact, but a
+    payload containing one can't be turned into JSON, so MQTT, HTTP and the JSON node will fail
+    on it, and it can't be mixed with numbers in arithmetic. <b>String</b> is always exact and safe
+    to send anywhere. Writes accept any of the three.
+    With the <b>nodes7</b> backend, LINT and ULINT only work in s7-read's struct mode for now: nodes7
+    itself can't read or write them, so other reads and writes are refused. Use snap7 for those.</dd>
     <dt>Debug logging <span class="property-type">boolean</span></dt>
     <dd>When enabled, the <code>nodes7</code> backend prints raw protocol trace
     output (every read/poll cycle) to stdout. Disabled by default to avoid

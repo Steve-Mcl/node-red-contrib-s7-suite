@@ -2,7 +2,7 @@ import { S7Address, S7AreaType, S7DataType } from '../types';
 import { S7Error, S7ErrorCode } from '../utils/error-codes';
 
 const NODES7_REGEX =
-  /^(DB)(\d+),(BOOL|BYTE|WORD|DWORD|INT|DINT|REAL|LREAL|CHAR|STRING|USINT|UINT|UDINT|LINT|ULINT|DATE|TIME|TIME_OF_DAY|DATE_AND_TIME|S5TIME|WSTRING)(\d+)(?:\.(\d))?(?:\.(\d+))?$/i;
+  /^(DB)(\d+),(BOOL|BYTE|WORD|DWORD|INT|DINT|REAL|LREAL|CHAR|STRING|USINT|UINT|UDINT|LINT|ULINT|DATE|TIME|TIME_OF_DAY|DATE_AND_TIME|DTLZ|DTL|DTZ|DT|S5TIME|WSTRING)(\d+)(?:\.(\d))?(?:\.(\d+))?$/i;
 
 const IEC_REGEX =
   /^(DB)(\d+)\.(DBX|DBB|DBW|DBD)(\d+)(?:\.(\d))?$/i;

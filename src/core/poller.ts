@@ -105,6 +105,19 @@ export class Poller extends EventEmitter {
       return newValue !== oldVal;
     }
 
+    // LINT/ULINT when the config returns them as BigInt
+    if (typeof newValue === 'bigint' && typeof oldVal === 'bigint') {
+      if (this.config.deadband > 0) {
+        return Math.abs(Number(newValue - oldVal)) > this.config.deadband;
+      }
+      return newValue !== oldVal;
+    }
+
+    // DT/DTL values are a new Date object on every read, so compare the time they hold
+    if (newValue instanceof Date && oldVal instanceof Date) {
+      return newValue.getTime() !== oldVal.getTime();
+    }
+
     return newValue !== oldVal;
   }
 }

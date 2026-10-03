@@ -108,6 +108,9 @@ export = function (RED: NodeAPI): void {
 
           const validTypes: Set<string> = new Set([
             'BOOL', 'BYTE', 'WORD', 'DWORD', 'INT', 'DINT', 'REAL', 'LREAL', 'CHAR', 'STRING',
+            'USINT', 'UINT', 'UDINT', 'LINT', 'ULINT',
+            'DATE', 'TIME', 'TIME_OF_DAY', 'DATE_AND_TIME', 'DT', 'DTZ', 'DTL', 'DTLZ', 'S5TIME',
+            'WSTRING',
           ]);
           for (const field of schema) {
             if (!field.name || typeof field.name !== 'string') {

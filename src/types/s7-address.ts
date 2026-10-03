@@ -18,8 +18,18 @@ export type S7DataType =
   | 'TIME'
   | 'TIME_OF_DAY'
   | 'DATE_AND_TIME'
+  | 'DT'
+  | 'DTZ'
+  | 'DTL'
+  | 'DTLZ'
   | 'S5TIME'
   | 'WSTRING';
+
+/**
+ * How LINT and ULINT values are returned: a JS number (exact only up to 2^53), a BigInt, or a
+ * decimal string. BigInt is exact but can't go through JSON.stringify (MQTT, HTTP, the JSON node).
+ */
+export type Int64Mode = 'number' | 'bigint' | 'string';
 
 export type S7AreaType = 'DB' | 'M' | 'I' | 'Q' | 'C' | 'T';
 

@@ -33,7 +33,7 @@
       });
 
       // Schema editableList for struct mode
-      var S7_TYPES = ['BOOL','BYTE','WORD','DWORD','INT','DINT','REAL','LREAL','CHAR','STRING'];
+      var S7_TYPES = ['BOOL','BYTE','WORD','DWORD','INT','DINT','LINT','USINT','UINT','UDINT','ULINT','REAL','LREAL','CHAR','STRING','WSTRING','DATE','TIME','TIME_OF_DAY','S5TIME','DATE_AND_TIME','DT','DTZ','DTL','DTLZ'];
       var schemaList = $('#s7w-schema-list').css({ 'min-height': '80px', 'min-width': '300px' }).editableList({
         addButton: 'Add field',
         removable: true,
@@ -52,7 +52,7 @@
           function updateVisibility() {
             var t = typeSelect.val();
             bitInput.toggle(t === 'BOOL');
-            lenInput.toggle(t === 'STRING');
+            lenInput.toggle(t === 'STRING' || t === 'WSTRING');
           }
           typeSelect.on('change', updateVisibility);
 
@@ -109,7 +109,7 @@
           if (name && !isNaN(offset)) {
             var field = { name: name, type: type, offset: offset };
             if (type === 'BOOL' && bit !== '') field.bit = parseInt(bit, 10);
-            if (type === 'STRING' && len !== '') field.length = parseInt(len, 10);
+            if ((type === 'STRING' || type === 'WSTRING') && len !== '') field.length = parseInt(len, 10);
             schema.push(field);
           }
         });
@@ -237,5 +237,11 @@
     <li><b>INT/DINT:</b> signed integer</li>
     <li><b>REAL/LREAL:</b> floating point number</li>
     <li><b>STRING:</b> text string</li>
+    <li><b>LINT/ULINT:</b> a number, a BigInt or an integer string. Use a BigInt or a string for values past
+      2^53, which a number can't hold exactly.</li>
+    <li><b>DT/DTL:</b> a <code>Date</code>, an ISO string or milliseconds since 1970, stored as the server's
+      local time. <b>DTZ/DTLZ</b> are the same in UTC. DT holds 1990 to 2089, DTL 1970 to 2262. Use DT
+      for a PLC <code>DATE_AND_TIME</code> and DTL for a <code>DTL</code>; use the Z form when the PLC keeps
+      UTC rather than its local clock.</li>
   </ul>
 </script>
