@@ -3,6 +3,15 @@
 
   // Connection status dot - polls state every 3s while editor is open
   window.s7SuiteStatusDot = function (serverSelectId, dotId) {
+    // Node-RED wraps the config select and its edit/add buttons in its own 70%-wide flex box
+    // inside our row. A long config label (e.g. "host:${PLC_PORT}") stops the select shrinking,
+    // which pushes the buttons out under the dot. Let the select shrink and the wrapper fill the
+    // row up to the dot instead.
+    var select = $(serverSelectId).css('min-width', 0);
+    var wrapper = select.parent();
+    if (!wrapper.is($(dotId).parent())) {
+      wrapper.css({ width: 'auto', flex: '1 1 auto', 'min-width': 0 });
+    }
     var interval = null;
     function update() {
       var id = $(serverSelectId).val();
