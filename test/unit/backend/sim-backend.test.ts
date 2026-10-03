@@ -71,6 +71,25 @@ describe('SimBackend', () => {
     expect(results[0].value).toBeCloseTo(99.9, 1);
   });
 
+  it('writes and reads back several values, from an array or a Buffer', async () => {
+    const address = { area: 'DB' as const, dbNumber: 1, dataType: 'INT' as const, offset: 60, bitOffset: 0, arrayLength: 3 };
+    await backend.write([{ name: 'a', address, value: [1, -2, 300] }]);
+    expect((await backend.read([{ name: 'a', address }]))[0].value).toEqual([1, -2, 300]);
+
+    const raw = Buffer.alloc(6);
+    raw.writeInt16BE(7, 0); raw.writeInt16BE(8, 2); raw.writeInt16BE(9, 4);
+    await backend.write([{ name: 'a', address, value: raw }]);
+    expect((await backend.read([{ name: 'a', address }]))[0].value).toEqual([7, 8, 9]);
+  });
+
+  it('refuses several values of the wrong length, and several bits', async () => {
+    const address = { area: 'DB' as const, dbNumber: 1, dataType: 'BYTE' as const, offset: 60, bitOffset: 0, arrayLength: 4 };
+    await expect(backend.write([{ name: 'a', address, value: [1, 2] }])).rejects.toThrow('takes 4 values; the array has 2');
+    const bits = { ...address, dataType: 'BOOL' as const };
+    await expect(backend.write([{ name: 'b', address: bits, value: [true, true, true, true] }]))
+      .rejects.toThrow('Writing several bits at once isn\'t supported yet');
+  });
+
   it('writes and reads back INT', async () => {
     await backend.write([{
       name: 'count',

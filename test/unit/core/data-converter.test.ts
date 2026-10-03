@@ -1,4 +1,4 @@
-import { byteLength, readValue, writeValue } from '../../../src/core/data-converter';
+import { arrayValues, byteLength, isArrayWrite, readValue, writeValue } from '../../../src/core/data-converter';
 import { S7Error } from '../../../src/utils/error-codes';
 
 describe('data-converter', () => {
@@ -261,8 +261,37 @@ describe('data-converter', () => {
     });
   });
 
-  describe('writeValue', () => {
-    it('writes BOOL true', () => {
+  describe('arrayValues', () => {
+    it('takes an array of the right length as it is', () => {
+      expect(arrayValues('INT', [1, 2, 3], 3, 'DB1 offset 0')).toEqual([1, 2, 3]);
+    });
+
+    it('splits a Buffer of raw bytes into values', () => {
+      const raw = Buffer.alloc(8);
+      raw.writeFloatBE(1.5, 0);
+      raw.writeFloatBE(-2, 4);
+      expect(arrayValues('REAL', raw, 2, 'DB1 offset 0')).toEqual([1.5, -2]);
+    });
+
+    it('takes a single value for a count of 1', () => {
+      expect(arrayValues('BYTE', 7, 1, 'DB1 offset 0')).toEqual([7]);
+    });
+
+    it('refuses the wrong length or a single value for a count above 1', () => {
+      expect(() => arrayValues('BYTE', [1], 2, 'DB1 offset 0')).toThrow('DB1 offset 0 takes 2 values; the array has 1');
+      expect(() => arrayValues('WORD', Buffer.alloc(3), 2, 'DB1 offset 0')).toThrow('takes 2 x WORD (4 bytes); the Buffer has 3 bytes');
+      expect(() => arrayValues('BYTE', 5, 2, 'DB1 offset 0')).toThrow('takes 2 values, as an array or a Buffer; got number');
+    });
+
+    it('never treats a STRING length as a count', () => {
+      const base = { area: 'DB' as const, dbNumber: 1, offset: 0, bitOffset: 0, arrayLength: 20 };
+      expect(isArrayWrite({ ...base, dataType: 'STRING' })).toBe(false);
+      expect(isArrayWrite({ ...base, dataType: 'BYTE' })).toBe(true);
+      expect(isArrayWrite({ ...base, dataType: 'BYTE', arrayLength: undefined })).toBe(false);
+    });
+  });
+
+  describe('writeValue', () => {    it('writes BOOL true', () => {
       const buf = Buffer.from([0x00]);
       writeValue(buf, 0, 'BOOL', true, 0);
       expect(buf[0]).toBe(0x01);

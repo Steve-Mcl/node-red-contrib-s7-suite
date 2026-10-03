@@ -276,6 +276,28 @@ describe('Snap7Backend', () => {
       expect(mockWriteArea).toHaveBeenCalled();
     });
 
+    it('writes several values in one go, from an array or a Buffer', async () => {
+      mockWriteArea.mockImplementation(
+        (_a: unknown, _d: unknown, _s: unknown, _l: unknown, _w: unknown, _b: unknown, cb: Function) => cb(),
+      );
+      const address = { area: 'DB' as const, dbNumber: 1, dataType: 'BYTE' as const, offset: 10, bitOffset: 0, arrayLength: 4 };
+
+      await backend.write([{ name: 'a', address, value: [1, 2, 3, 4] }]);
+      await backend.write([{ name: 'b', address, value: Buffer.from([5, 6, 7, 8]) }]);
+
+      expect(mockWriteArea).toHaveBeenCalledTimes(2);
+      const [, , start, length, , first] = mockWriteArea.mock.calls[0];
+      expect([start, length, [...first]]).toEqual([10, 4, [1, 2, 3, 4]]);
+      expect([...mockWriteArea.mock.calls[1][5]]).toEqual([5, 6, 7, 8]);
+    });
+
+    it('refuses several values of the wrong length without writing', async () => {
+      const address = { area: 'DB' as const, dbNumber: 1, dataType: 'REAL' as const, offset: 0, bitOffset: 0, arrayLength: 2 };
+      await expect(backend.write([{ name: 'a', address, value: Buffer.alloc(4) }]))
+        .rejects.toThrow('DB1 offset 0 takes 2 x REAL (8 bytes); the Buffer has 4 bytes');
+      expect(mockWriteArea).not.toHaveBeenCalled();
+    });
+
     it('writes BOOL with read-modify-write', async () => {
       const readBuf = Buffer.from([0x00]);
       mockReadArea.mockImplementation(

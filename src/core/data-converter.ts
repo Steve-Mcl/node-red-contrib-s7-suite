@@ -1,4 +1,4 @@
-import { S7DataType } from '../types';
+import { S7Address, S7DataType } from '../types';
 import { S7Error, S7ErrorCode } from '../utils/error-codes';
 
 /** S7 epoch: 1990-01-01 */
@@ -142,6 +142,45 @@ export function readValue(buffer: Buffer, offset: number, dataType: S7DataType, 
       return count * multipliers[timeBase];
     }
   }
+}
+
+/**
+ * Whether a write goes to several values (`DB1,BYTE0.0.4`). A STRING's suffix is its length, not a
+ * count, so strings are never array writes.
+ */
+export function isArrayWrite(addr: S7Address): boolean {
+  return addr.arrayLength !== undefined && addr.dataType !== 'STRING' && addr.dataType !== 'WSTRING';
+}
+
+/**
+ * The values to write to an address with a count (`DB1,REAL0.0.4`): an array of exactly `count`
+ * values, or a Buffer holding exactly their bytes, as node-red-contrib-buffer-parser's buffer-maker
+ * produces. Anything else is refused rather than written as a single value.
+ */
+export function arrayValues(dataType: S7DataType, value: unknown, count: number, where: string): unknown[] {
+  if (Buffer.isBuffer(value)) {
+    const size = byteLength(dataType);
+    if (value.length !== count * size) {
+      throw new S7Error(
+        S7ErrorCode.WRITE_FAILED,
+        `${where} takes ${count} x ${dataType} (${count * size} bytes); the Buffer has ${value.length} bytes`,
+      );
+    }
+    return Array.from({ length: count }, (_, i) => readValue(value, i * size, dataType));
+  }
+  if (Array.isArray(value)) {
+    if (value.length !== count) {
+      throw new S7Error(S7ErrorCode.WRITE_FAILED, `${where} takes ${count} values; the array has ${value.length}`);
+    }
+    return value;
+  }
+  if (count === 1) {
+    return [value];
+  }
+  throw new S7Error(
+    S7ErrorCode.WRITE_FAILED,
+    `${where} takes ${count} values, as an array or a Buffer; got ${value === null ? 'null' : typeof value}`,
+  );
 }
 
 /** Writes a typed value into a buffer at the given offset. */

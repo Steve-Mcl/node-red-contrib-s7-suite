@@ -75,7 +75,7 @@ S7-200, S7-300, S7-400, S7-1200, S7-1500, LOGO!
 | `msg.topic` | string | Overrides configured address |
 | `msg.mode` | string | Overrides write mode (`single`, `multi`, `struct`) |
 | `msg.schema` | object[] | Overrides struct schema (struct mode only) |
-| `msg.payload` | any | Value to write (type must match address data type) |
+| `msg.payload` | any | Value to write (type must match address data type). For an address with a count (`DB1,BYTE10.0.4`), an array of that many values or a `Buffer` of their bytes |
 
 On success, the input message is passed through to the output.
 

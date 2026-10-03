@@ -3,6 +3,7 @@ import { S7ConnectionConfig } from '../types/s7-connection';
 import { S7ReadItem, S7ReadResult, S7WriteItem } from '../types/s7-address';
 import { S7BlockInfo, S7BlockList, S7BlockType } from '../types/s7-browse';
 import { toNodes7Address } from '../core/address-parser';
+import { arrayValues, isArrayWrite } from '../core/data-converter';
 import { S7Error, S7ErrorCode } from '../utils/error-codes';
 
 export class NodeS7Backend implements IS7Backend {
@@ -117,14 +118,18 @@ export class NodeS7Backend implements IS7Backend {
       throw new S7Error(S7ErrorCode.DISCONNECTED, 'Not connected');
     }
 
-    const names: string[] = [];
-    const values: unknown[] = [];
+    const names = items.map((item) => item.nodes7Address ?? toNodes7Address(item.address));
+    // Same rules as the other backends for several values: an array of the right length, or a Buffer
+    // of their raw bytes, which nodes7 itself can't take
+    const values = items.map((item, i) => {
+      const addr = item.address;
+      if (!isArrayWrite(addr)) return item.value;
+      const list = arrayValues(addr.dataType, item.value, addr.arrayLength!, names[i]);
+      return list.length === 1 ? list[0] : list; // nodes7 takes a count of 1 as a single value
+    });
 
-    for (const item of items) {
-      const addr = item.nodes7Address ?? toNodes7Address(item.address);
+    for (const addr of names) {
       this.conn.addItems(addr);
-      names.push(addr);
-      values.push(item.value);
     }
 
     const removeAll = (): void => {

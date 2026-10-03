@@ -2,7 +2,7 @@ import { IS7Backend } from './s7-backend.interface';
 import { S7ConnectionConfig } from '../types/s7-connection';
 import { S7ReadItem, S7ReadResult, S7WriteItem, AREA_CODE_MAP } from '../types/s7-address';
 import { S7BlockInfo, S7BlockList, S7BlockType } from '../types/s7-browse';
-import { byteLength, readValue, writeValue } from '../core/data-converter';
+import { arrayValues, byteLength, isArrayWrite, readValue, writeValue } from '../core/data-converter';
 import { S7Error, S7ErrorCode } from '../utils/error-codes';
 
 const BLOCK_TYPE_MAP: Record<S7BlockType, number> = {
@@ -162,12 +162,22 @@ export class Snap7Backend implements IS7Backend {
         throw new S7Error(S7ErrorCode.WRITE_FAILED, `Unsupported area: ${addr.area}`);
       }
       const len = byteLength(addr.dataType, addr.stringLength);
+      const where = `${addr.area === 'DB' ? `DB${addr.dbNumber}` : addr.area} offset ${addr.offset}`;
 
       if (addr.dataType === 'BOOL') {
+        if ((addr.arrayLength ?? 1) > 1) {
+          throw new S7Error(S7ErrorCode.WRITE_FAILED, `Writing several bits at once isn't supported yet (${where})`);
+        }
+        const value = addr.arrayLength ? arrayValues('BOOL', item.value, 1, where)[0] : item.value;
         // Read-modify-write for booleans
         const buf = await this.readRawArea(areaCode, addr.dbNumber, addr.offset, 1);
-        writeValue(buf, 0, 'BOOL', item.value, addr.bitOffset);
+        writeValue(buf, 0, 'BOOL', value, addr.bitOffset);
         await this.writeRawArea(areaCode, addr.dbNumber, addr.offset, 1, buf);
+      } else if (isArrayWrite(addr)) {
+        const values = arrayValues(addr.dataType, item.value, addr.arrayLength!, where);
+        const buf = Buffer.alloc(len * values.length);
+        values.forEach((v, i) => writeValue(buf, i * len, addr.dataType, v));
+        await this.writeRawArea(areaCode, addr.dbNumber, addr.offset, buf.length, buf);
       } else {
         const buf = Buffer.alloc(len);
         writeValue(buf, 0, addr.dataType, item.value, addr.bitOffset);

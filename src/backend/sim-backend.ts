@@ -2,7 +2,7 @@ import { IS7Backend } from './s7-backend.interface';
 import { S7ConnectionConfig } from '../types/s7-connection';
 import { S7ReadItem, S7ReadResult, S7WriteItem } from '../types/s7-address';
 import { S7BlockInfo, S7BlockList, S7BlockType } from '../types/s7-browse';
-import { byteLength, readValue, writeValue } from '../core/data-converter';
+import { arrayValues, byteLength, isArrayWrite, readValue, writeValue } from '../core/data-converter';
 
 export class SimBackend implements IS7Backend {
   private connected = false;
@@ -70,7 +70,9 @@ export class SimBackend implements IS7Backend {
         }
 
         const len = byteLength(addr.dataType, addr.stringLength);
-        if (addr.offset + len > buf.length) {
+        // Several values (DB1,INT0.0.3) come back as an array, as on the other backends
+        const count = isArrayWrite(addr) && addr.dataType !== 'BOOL' ? addr.arrayLength! : 0;
+        if (addr.offset + len * Math.max(count, 1) > buf.length) {
           return {
             name: item.name, address: addr, value: null,
             quality: 'bad' as const, timestamp: Date.now(),
@@ -78,7 +80,9 @@ export class SimBackend implements IS7Backend {
           };
         }
 
-        const value = readValue(buf, addr.offset, addr.dataType, addr.bitOffset);
+        const value = count
+          ? Array.from({ length: count }, (_, i) => readValue(buf, addr.offset + i * len, addr.dataType))
+          : readValue(buf, addr.offset, addr.dataType, addr.bitOffset);
 
         return {
           name: item.name, address: addr, value,
@@ -100,14 +104,31 @@ export class SimBackend implements IS7Backend {
       const key = this.areaKey(addr.area, addr.dbNumber);
       let buf = this.memory.get(key);
 
+      const count = isArrayWrite(addr) ? addr.arrayLength! : 1;
       if (!buf) {
         // Auto-create area
-        const size = Math.max(addr.offset + byteLength(addr.dataType, addr.stringLength), 100);
+        const size = Math.max(addr.offset + byteLength(addr.dataType, addr.stringLength) * count, 100);
         this.initArea(key, size);
         buf = this.memory.get(key)!;
       }
 
-      writeValue(buf, addr.offset, addr.dataType, item.value, addr.bitOffset);
+      const where = `${key} offset ${addr.offset}`;
+      if (addr.dataType === 'BOOL') {
+        if (count > 1) {
+          throw new Error(`Writing several bits at once isn't supported yet (${where})`);
+        }
+        const value = addr.arrayLength ? arrayValues('BOOL', item.value, 1, where)[0] : item.value;
+        writeValue(buf, addr.offset, 'BOOL', value, addr.bitOffset);
+      } else if (isArrayWrite(addr)) {
+        const len = byteLength(addr.dataType);
+        const values = arrayValues(addr.dataType, item.value, count, where);
+        if (addr.offset + len * count > buf.length) {
+          throw new Error(`Offset ${addr.offset} out of range (area size: ${buf.length})`);
+        }
+        values.forEach((v, i) => writeValue(buf!, addr.offset + i * len, addr.dataType, v));
+      } else {
+        writeValue(buf, addr.offset, addr.dataType, item.value, addr.bitOffset);
+      }
     }
   }
 

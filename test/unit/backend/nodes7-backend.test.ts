@@ -198,6 +198,19 @@ describe('NodeS7Backend', () => {
       expect(mockWriteItems).toHaveBeenCalled();
     });
 
+    it('turns a Buffer of raw bytes into values for nodes7, and checks the count', async () => {
+      mockWriteItems.mockImplementation((_n: unknown, _v: unknown, cb: Function) => cb());
+      const address = { area: 'DB' as const, dbNumber: 1, dataType: 'INT' as const, offset: 0, bitOffset: 0, arrayLength: 2 };
+      const raw = Buffer.alloc(4);
+      raw.writeInt16BE(-5, 0); raw.writeInt16BE(6, 2);
+
+      await backend.write([{ name: 'a', address, nodes7Address: 'DB1,INT0.2', value: raw }]);
+      expect(mockWriteItems).toHaveBeenCalledWith(['DB1,INT0.2'], [[-5, 6]], expect.any(Function));
+
+      await expect(backend.write([{ name: 'a', address, nodes7Address: 'DB1,INT0.2', value: [1] }]))
+        .rejects.toThrow('DB1,INT0.2 takes 2 values; the array has 1');
+    });
+
     it('handles write error', async () => {
       mockWriteItems.mockImplementation((_n: unknown, _v: unknown, cb: Function) => {
         cb(new Error('Write failed'));

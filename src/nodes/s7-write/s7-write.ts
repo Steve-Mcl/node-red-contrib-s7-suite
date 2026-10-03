@@ -191,13 +191,19 @@ export = function (RED: NodeAPI): void {
           done(new Error('msg.payload is required for single write mode'));
           return;
         }
+        const parsed = parseAddress(addressStr);
         const pType = typeof msg.payload;
-        if (pType !== 'number' && pType !== 'boolean' && pType !== 'string' && pType !== 'bigint') {
+        // An address with a count (DB1,BYTE0.0.4) takes an array of values or a Buffer of their bytes
+        const isMany = Array.isArray(msg.payload) || Buffer.isBuffer(msg.payload);
+        if (isMany && parsed.arrayLength === undefined) {
+          done(new Error(`An array or Buffer needs an address with a count, e.g. DB1,BYTE0.0.4 (got ${addressStr})`));
+          return;
+        }
+        if (!isMany && pType !== 'number' && pType !== 'boolean' && pType !== 'string' && pType !== 'bigint') {
           done(new Error(`msg.payload must be a number, boolean, string, or bigint for single write mode (got ${pType})`));
           return;
         }
 
-        const parsed = parseAddress(addressStr);
         const items: S7WriteItem[] = [
           {
             name: 'item_0',
