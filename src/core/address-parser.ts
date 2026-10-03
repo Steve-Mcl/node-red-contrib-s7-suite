@@ -112,6 +112,12 @@ function validateAddress(addr: S7Address, raw: string): void {
   if (addr.dataType === 'BOOL' && (addr.bitOffset < 0 || addr.bitOffset > 7)) {
     throw new S7Error(S7ErrorCode.INVALID_ADDRESS, `Bit offset must be 0-7 for BOOL in address: "${raw}"`);
   }
+  if (addr.stringLength !== undefined) {
+    const max = addr.dataType === 'WSTRING' ? 16382 : 254;
+    if (addr.stringLength < 1 || addr.stringLength > max) {
+      throw new S7Error(S7ErrorCode.INVALID_ADDRESS, `${addr.dataType} length must be 1-${max} in address: "${raw}"`);
+    }
+  }
 }
 
 function tryParseNodes7Style(input: string): S7Address | null {
@@ -121,6 +127,15 @@ function tryParseNodes7Style(input: string): S7Address | null {
   const dbNumber = parseInt(match[2], 10);
   const dataType = match[3].toUpperCase() as S7DataType;
   const offset = parseInt(match[4], 10);
+
+  // For a string the suffix is its maximum length, as in nodes7: DB1,STRING50.20 is a STRING[20]
+  if (dataType === 'STRING' || dataType === 'WSTRING') {
+    const lengthText = match[6] ?? match[5];
+    const result: S7Address = { area: 'DB', dbNumber, dataType, offset, bitOffset: 0 };
+    if (lengthText !== undefined) result.stringLength = parseInt(lengthText, 10);
+    return result;
+  }
+
   const bitOffset = match[5] !== undefined ? parseInt(match[5], 10) : 0;
   const arrayLength = match[6] !== undefined ? parseInt(match[6], 10) : undefined;
 
@@ -198,6 +213,9 @@ export function toNodes7Address(addr: S7Address): string {
     let result = `DB${addr.dbNumber},${addr.dataType}${addr.offset}`;
     if (addr.dataType === 'BOOL') {
       result += `.${addr.bitOffset}`;
+    }
+    if (addr.stringLength !== undefined && (addr.dataType === 'STRING' || addr.dataType === 'WSTRING')) {
+      result += `.${addr.stringLength}`;
     }
     if (addr.arrayLength !== undefined) {
       result += `.${addr.arrayLength}`;

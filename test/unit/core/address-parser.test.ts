@@ -73,6 +73,37 @@ describe('address-parser', () => {
       const addr = parseAddress('DB1,STRING10');
       expect(addr.dataType).toBe('STRING');
       expect(addr.offset).toBe(10);
+      expect(addr.stringLength).toBeUndefined();
+    });
+
+    it('parses the suffix on a STRING as its max length, as nodes7 does', () => {
+      const addr = parseAddress('DB1,STRING50.20');
+      expect(addr.offset).toBe(50);
+      expect(addr.stringLength).toBe(20);
+      expect(addr.arrayLength).toBeUndefined();
+    });
+
+    it('parses a single-digit STRING length (not a bit offset)', () => {
+      const addr = parseAddress('DB1,STRING50.5');
+      expect(addr.stringLength).toBe(5);
+      expect(addr.bitOffset).toBe(0);
+    });
+
+    it('parses the suffix on a WSTRING as its max length', () => {
+      const addr = parseAddress('DB2,WSTRING0.100');
+      expect(addr.dataType).toBe('WSTRING');
+      expect(addr.stringLength).toBe(100);
+    });
+
+    it('rejects STRING lengths outside 1-254', () => {
+      expect(() => parseAddress('DB1,STRING0.0')).toThrow('STRING length must be 1-254');
+      expect(() => parseAddress('DB1,STRING0.255')).toThrow('STRING length must be 1-254');
+      expect(() => parseAddress('DB1,STRING0.254')).not.toThrow();
+    });
+
+    it('rejects WSTRING lengths outside 1-16382', () => {
+      expect(() => parseAddress('DB1,WSTRING0.16383')).toThrow('WSTRING length must be 1-16382');
+      expect(() => parseAddress('DB1,WSTRING0.16382')).not.toThrow();
     });
 
     it('is case-insensitive', () => {
@@ -260,6 +291,12 @@ describe('address-parser', () => {
         bitOffset: 0,
       };
       expect(toNodes7Address(addr)).toBe('IB0');
+    });
+
+    it('keeps the length on a STRING address', () => {
+      expect(toNodes7Address(parseAddress('DB1,STRING50.20'))).toBe('DB1,STRING50.20');
+      expect(toNodes7Address(parseAddress('DB1,STRING50.5'))).toBe('DB1,STRING50.5');
+      expect(toNodes7Address(parseAddress('DB1,STRING50'))).toBe('DB1,STRING50');
     });
   });
 });

@@ -236,6 +236,8 @@
     <li><b>BYTE/WORD/DWORD:</b> unsigned integer</li>
     <li><b>INT/DINT:</b> signed integer</li>
     <li><b>REAL/LREAL:</b> floating point number</li>
-    <li><b>STRING:</b> text string</li>
+    <li><b>STRING:</b> text string. <code>DB1,STRING50.20</code> is a <code>STRING[20]</code> at offset 50; the
+      length can be left off when the string is already declared in the PLC. Only the string's current length
+      and characters are written, never its max length, and a value longer than the max length is rejected.</li>
   </ul>
 </script>

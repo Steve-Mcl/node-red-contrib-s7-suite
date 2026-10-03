@@ -85,6 +85,30 @@ describe('SimBackend', () => {
     expect(results[0].value).toBe(-500);
   });
 
+  it('writes a STRING without touching anything after it', async () => {
+    const str = { area: 'DB' as const, dbNumber: 1, dataType: 'STRING' as const, offset: 50, bitOffset: 0, stringLength: 20 };
+    const after = { area: 'DB' as const, dbNumber: 1, dataType: 'DWORD' as const, offset: 72, bitOffset: 0 };
+    await backend.write([{ name: 'after', address: after, value: 0xAABBCCDD }]);
+
+    // First write declares the STRING[20] in the empty header, the second keeps it
+    await backend.write([{ name: 's', address: str, value: 'hello world' }]);
+    await backend.write([{ name: 's', address: { ...str, stringLength: undefined }, value: 'hi' }]);
+
+    const raw = await backend.readRawArea(0x84, 1, 50, 2);
+    expect([...raw]).toEqual([20, 2]);
+    const results = await backend.read([{ name: 's', address: str }, { name: 'after', address: after }]);
+    expect(results[0].value).toBe('hi');
+    expect(results[1].value).toBe(0xAABBCCDD);
+  });
+
+  it('rejects a STRING write with no known length', async () => {
+    await expect(backend.write([{
+      name: 's',
+      address: { area: 'DB', dbNumber: 1, dataType: 'STRING', offset: 60, bitOffset: 0 },
+      value: 'x',
+    }])).rejects.toThrow('has an empty header');
+  });
+
   it('writes and reads back BOOL', async () => {
     await backend.write([{
       name: 'flag',

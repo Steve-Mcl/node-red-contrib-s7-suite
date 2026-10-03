@@ -297,6 +297,63 @@ describe('Snap7Backend', () => {
       expect(mockWriteArea).toHaveBeenCalled();
     });
 
+    it('writes a STRING without touching its max length or anything after it', async () => {
+      // STRING[20] at DB1 offset 50, already declared in the PLC
+      mockReadArea.mockImplementation(
+        (_a: unknown, _d: unknown, _s: unknown, _l: unknown, _w: unknown, cb: Function) => cb(undefined, Buffer.from([20, 0])),
+      );
+      mockWriteArea.mockImplementation(
+        (_a: unknown, _d: unknown, _s: unknown, _l: unknown, _w: unknown, _b: unknown, cb: Function) => cb(),
+      );
+
+      await backend.write([
+        {
+          name: 's',
+          address: { area: 'DB', dbNumber: 1, dataType: 'STRING', offset: 50, bitOffset: 0, stringLength: 20 },
+          value: 'hello world',
+        },
+      ]);
+
+      expect(mockReadArea).toHaveBeenCalledWith(0x84, 1, 50, 2, 0x02, expect.any(Function));
+      expect(mockWriteArea).toHaveBeenCalledTimes(1);
+      const [, , start, length, , buf] = mockWriteArea.mock.calls[0];
+      expect(start).toBe(51); // the current-length byte, not the max-length byte
+      expect(length).toBe(12); // 1 length byte + 11 characters
+      expect(buf[0]).toBe(11);
+      expect(buf.toString('ascii', 1, 12)).toBe('hello world');
+    });
+
+    it('writes a WSTRING without touching its max length', async () => {
+      mockReadArea.mockImplementation(
+        (_a: unknown, _d: unknown, _s: unknown, _l: unknown, _w: unknown, cb: Function) => cb(undefined, Buffer.from([0, 10, 0, 0])),
+      );
+      mockWriteArea.mockImplementation(
+        (_a: unknown, _d: unknown, _s: unknown, _l: unknown, _w: unknown, _b: unknown, cb: Function) => cb(),
+      );
+
+      await backend.write([
+        { name: 'w', address: { area: 'DB', dbNumber: 1, dataType: 'WSTRING', offset: 10, bitOffset: 0 }, value: 'Hi' },
+      ]);
+
+      expect(mockReadArea).toHaveBeenCalledWith(0x84, 1, 10, 4, 0x02, expect.any(Function));
+      const [, , start, length] = mockWriteArea.mock.calls[0];
+      expect(start).toBe(12);
+      expect(length).toBe(6); // 2 length bytes + 2 UTF-16 characters
+    });
+
+    it('refuses a STRING longer than its max length without writing', async () => {
+      mockReadArea.mockImplementation(
+        (_a: unknown, _d: unknown, _s: unknown, _l: unknown, _w: unknown, cb: Function) => cb(undefined, Buffer.from([5, 0])),
+      );
+
+      await expect(
+        backend.write([
+          { name: 's', address: { area: 'DB', dbNumber: 1, dataType: 'STRING', offset: 0, bitOffset: 0 }, value: 'too long' },
+        ]),
+      ).rejects.toThrow('STRING at DB1 offset 0 holds 5 characters; the value has 8');
+      expect(mockWriteArea).not.toHaveBeenCalled();
+    });
+
     it('throws when not connected', async () => {
       const freshBackend = new Snap7Backend();
       await expect(

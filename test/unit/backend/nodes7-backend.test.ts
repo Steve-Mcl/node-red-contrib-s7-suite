@@ -214,6 +214,65 @@ describe('NodeS7Backend', () => {
         ]),
       ).rejects.toThrow('nodes7 write failed');
     });
+
+    // readAllItems answers the header read for whichever BYTE item was added
+    const headerIs = (header: number[]): void => {
+      mockReadAllItems.mockImplementation((cb: Function) => {
+        const addr = mockAddItems.mock.calls[mockAddItems.mock.calls.length - 1][0];
+        cb(undefined, { [addr]: header });
+      });
+    };
+
+    it('writes a STRING as bytes, without touching its max length or anything after it', async () => {
+      headerIs([20, 0]);
+      mockWriteItems.mockImplementation((_n: unknown, _v: unknown, cb: Function) => cb());
+
+      await backend.write([
+        {
+          name: 's',
+          address: { area: 'DB', dbNumber: 1, dataType: 'STRING', offset: 50, bitOffset: 0, stringLength: 20 },
+          nodes7Address: 'DB1,STRING50.20',
+          value: 'hi',
+        },
+      ]);
+
+      expect(mockAddItems).toHaveBeenCalledWith('DB1,BYTE50.2'); // the header read
+      expect(mockWriteItems).toHaveBeenCalledWith(['DB1,BYTE51.3'], [[2, 0x68, 0x69]], expect.any(Function));
+    });
+
+    it('writes a WSTRING as bytes', async () => {
+      headerIs([0, 10, 0, 0]);
+      mockWriteItems.mockImplementation((_n: unknown, _v: unknown, cb: Function) => cb());
+
+      await backend.write([
+        { name: 'w', address: { area: 'DB', dbNumber: 1, dataType: 'WSTRING', offset: 10, bitOffset: 0 }, value: 'A' },
+      ]);
+
+      expect(mockAddItems).toHaveBeenCalledWith('DB1,BYTE10.4');
+      expect(mockWriteItems).toHaveBeenCalledWith(['DB1,BYTE12.4'], [[0, 1, 0, 0x41]], expect.any(Function));
+    });
+
+    it('writes an empty STRING as a single BYTE', async () => {
+      headerIs([20, 5]);
+      mockWriteItems.mockImplementation((_n: unknown, _v: unknown, cb: Function) => cb());
+
+      await backend.write([
+        { name: 's', address: { area: 'DB', dbNumber: 1, dataType: 'STRING', offset: 0, bitOffset: 0 }, value: '' },
+      ]);
+
+      expect(mockWriteItems).toHaveBeenCalledWith(['DB1,BYTE1'], [0], expect.any(Function));
+    });
+
+    it('refuses a STRING longer than its max length without writing', async () => {
+      headerIs([5, 0]);
+
+      await expect(
+        backend.write([
+          { name: 's', address: { area: 'DB', dbNumber: 1, dataType: 'STRING', offset: 0, bitOffset: 0 }, value: 'too long' },
+        ]),
+      ).rejects.toThrow('STRING at DB1 offset 0 holds 5 characters; the value has 8');
+      expect(mockWriteItems).not.toHaveBeenCalled();
+    });
   });
 
   describe('browse methods', () => {
