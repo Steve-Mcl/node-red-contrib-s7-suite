@@ -34,20 +34,21 @@
 
       // Schema editableList for struct mode
       var S7_TYPES = ['BOOL','BYTE','WORD','DWORD','INT','DINT','REAL','LREAL','CHAR','STRING'];
-      var schemaList = $('#s7w-schema-list').css({ 'min-height': '80px', 'min-width': '300px' }).editableList({
+      var schemaList = $('#s7w-schema-list').css({ 'min-height': '150px' }).editableList({
         addButton: 'Add field',
         removable: true,
         sortable: true,
         addItem: function (row, index, data) {
-          var nameInput = $('<input type="text" placeholder="Field name" style="width:22%;">').val(data.name || '');
-          var typeSelect = $('<select style="width:22%;margin-left:2%;">');
+          // Name takes the spare width; the rest are sized for their content
+          var nameInput = $('<input type="text" placeholder="Field name" style="flex:1;min-width:80px;">').val(data.name || '');
+          var typeSelect = $('<select style="flex:0 0 100px;">');
           S7_TYPES.forEach(function(t) {
             typeSelect.append($('<option>').val(t).text(t));
           });
           typeSelect.val(data.type || 'REAL');
-          var offsetInput = $('<input type="number" placeholder="Offset" style="width:18%;margin-left:2%;" min="0">').val(data.offset != null ? data.offset : '');
-          var bitInput = $('<input type="number" placeholder="Bit" style="width:14%;margin-left:2%;" min="0" max="7">').val(data.bit != null ? data.bit : '');
-          var lenInput = $('<input type="number" placeholder="Str len" style="width:14%;margin-left:2%;" min="1">').val(data.length != null ? data.length : '');
+          var offsetInput = $('<input type="number" placeholder="Offset" style="flex:0 0 80px;min-width:0;" min="0">').val(data.offset != null ? data.offset : '');
+          var bitInput = $('<input type="number" placeholder="Bit" style="flex:0 0 60px;min-width:0;" min="0" max="7">').val(data.bit != null ? data.bit : '');
+          var lenInput = $('<input type="number" placeholder="Str len" style="flex:0 0 80px;min-width:0;" min="1">').val(data.length != null ? data.length : '');
 
           function updateVisibility() {
             var t = typeSelect.val();
@@ -56,10 +57,17 @@
           }
           typeSelect.on('change', updateVisibility);
 
-          row.append(nameInput, typeSelect, offsetInput, bitInput, lenInput);
+          $('<div style="display:flex;gap:4px;align-items:center;">')
+            .append(nameInput, typeSelect, offsetInput, bitInput, lenInput)
+            .appendTo(row);
           updateVisibility();
+          // The Add button passes no data; loading a saved schema always does
+          if (Object.keys(data).length === 0) {
+            setTimeout(function () { nameInput.trigger('focus'); }, 0);
+          }
         }
       });
+      s7SuiteAccelerator(schemaList, 'a');
 
       // Load existing schema
       try {
@@ -68,6 +76,11 @@
           schemaArr.forEach(function (f) {
             schemaList.editableList('addItem', f);
           });
+          // editableList scrolls to the bottom after every addItem (on a timeout); queue a
+          // scroll back to the top after those so a reopened node starts at its first field
+          setTimeout(function () {
+            schemaList.closest('.red-ui-editableList-container').scrollTop(0);
+          }, 0);
         }
       } catch (e) { /* ignore */ }
 
@@ -86,7 +99,11 @@
         $('#s7w-single-hint').toggle(mode === 'single');
       }
 
-      $('#node-input-mode').on('change', updateModeUI);
+      $('#node-input-mode').on('change', function () {
+        updateModeUI();
+        // The schema list may have appeared or gone; let oneditresize size it
+        RED.tray.resize();
+      });
       updateModeUI();
     },
     oneditsave: function () {
@@ -115,6 +132,22 @@
         });
         this.schema = JSON.stringify(schema);
       }
+    },
+    oneditresize: function (size) {
+      // Give the schema list the height the other rows leave, as the change and switch nodes do,
+      // so a long schema scrolls inside the list instead of stretching the whole panel
+      var section = $('#s7w-schema-section');
+      if (!section.is(':visible')) return;
+      var height = size.height;
+      $('#dialog-form > div:visible').not(section).each(function () {
+        height -= $(this).outerHeight(true);
+      });
+      var listRow = section.children('.s7w-list-row');
+      section.children().not(listRow).each(function () {
+        height -= $(this).outerHeight(true);
+      });
+      height -= parseInt(listRow.css('marginTop'), 10) + parseInt(listRow.css('marginBottom'), 10);
+      $('#s7w-schema-list').editableList('height', Math.max(150, height));
     }
   });
 </script>
@@ -164,9 +197,9 @@
   <div id="s7w-schema-section" style="display:none;">
     <div class="form-row">
       <label style="vertical-align:top;"><i class="fa fa-th-list"></i> Schema</label>
-      <div style="display:inline-block;width:70%;">
-        <ol id="s7w-schema-list"></ol>
-      </div>
+    </div>
+    <div class="form-row s7w-list-row">
+      <ol id="s7w-schema-list"></ol>
     </div>
     <div class="form-tips">
       <p>Writes structured data to a DB area. <code>msg.payload</code> is an object with field names matching the schema.</p>
