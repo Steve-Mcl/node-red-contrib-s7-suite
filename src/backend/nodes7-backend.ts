@@ -8,11 +8,14 @@ import { S7Error, S7ErrorCode } from '../utils/error-codes';
 // The address types nodes7 0.3.18 understands (stringToS7Addr in nodeS7.js). It silently drops
 // any other item, so a write never calls back on a fresh connection, and on a connection that
 // has written before it sends the previous write again and reports success. Check first.
+// LINT is left out too: nodes7 parses it, but its LINT read and write are commented out, so a read
+// returns nothing and a write sends eight zero bytes.
 const NODES7_DB_TYPES = new Set([
   'X', 'B', 'C', 'BYTE', 'CHAR', 'W', 'WORD', 'I', 'INT', 'DW', 'DWT', 'DWORD', 'DI', 'DINT',
-  'R', 'REAL', 'LR', 'LREAL', 'LI', 'LINT', 'WDT', 'DT', 'DTZ', 'DTL', 'DTLZ', 'S', 'STRING',
+  'R', 'REAL', 'LR', 'LREAL', 'WDT', 'DT', 'DTZ', 'DTL', 'DTLZ', 'S', 'STRING',
 ]);
-const AREA_SUFFIXES = ['', 'B', 'C', 'W', 'I', 'D', 'DI', 'R', 'LR', 'LI'];
+const NODES7_UNFINISHED_TYPES = new Set(['LI', 'LINT']);
+const AREA_SUFFIXES = ['', 'B', 'C', 'W', 'I', 'D', 'DI', 'R', 'LR'];
 const NODES7_AREA_TYPES = new Set([
   ...['I', 'E', 'Q', 'A', 'M'].flatMap((area) => AREA_SUFFIXES.map((s) => area + s)),
   ...['PI', 'PE', 'PQ', 'PA'].flatMap((area) => ['B', 'C', 'W', 'I', 'D', 'DI', 'R'].map((s) => area + s)),
@@ -25,6 +28,9 @@ export function nodes7Unsupported(addr: string): string | undefined {
   if (rest !== undefined) {
     const parts = rest.split('.');
     const type = parts[0].replace(/[0-9]/g, '').toUpperCase(); // as nodes7 reads it, so S5TIME is "STIME"
+    if (NODES7_UNFINISHED_TYPES.has(type)) {
+      return `"${addr}" isn't supported by the nodes7 backend (nodes7 can't read or write LINT); use the snap7 backend for it`;
+    }
     if (!NODES7_DB_TYPES.has(type)) {
       const name = parts[0].replace(/\d+$/, '').toUpperCase();
       return `"${addr}" isn't supported by the nodes7 backend (nodes7 has no ${name} type); use the snap7 backend for it`;

@@ -207,7 +207,7 @@ describe('nodes7Unsupported', () => {
 
   it.each([
     'DB1,INT0', 'DB1,DINT4', 'DB1,WORD0', 'DB1,DWORD0', 'DB1,BYTE0', 'DB1,CHAR0', 'DB1,REAL0', 'DB1,LREAL0',
-    'DB1,LINT0', 'DB1,STRING0.20', 'DB1.DBW0', 'DB1.DBD0', 'DB1.DBB0',
+    'DB1,STRING0.20', 'DB1.DBW0', 'DB1.DBD0', 'DB1.DBB0',
     'MB0', 'MW0', 'MD0', 'M0.1', 'IB0', 'I0.0', 'QW2', 'Q0.0',
   ])('accepts %s', (address) => {
     expect(via(address)).toBeUndefined();
@@ -219,6 +219,15 @@ describe('nodes7Unsupported', () => {
     ['DB1,DATE_AND_TIME0', 'DATE_AND_TIME'], ['DB1,S5TIME0', 'S5TIME'],
   ])('rejects %s', (address, type) => {
     expect(via(address)).toContain(`nodes7 has no ${type} type`);
+  });
+
+  it('rejects LINT, which nodes7 parses but never reads or writes', () => {
+    expect(via('DB1,LINT0')).toBe(
+      '"DB1,LINT0" isn\'t supported by the nodes7 backend (nodes7 can\'t read or write LINT); use the snap7 backend for it',
+    );
+    for (const addr of ['DB1,LI0', 'MLI0', 'ILI0', 'QLI0', 'ELI0', 'ALI0']) {
+      expect(nodes7Unsupported(addr)).toBeDefined();
+    }
   });
 
   it('rejects a STRING with no length', () => {
