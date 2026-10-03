@@ -25,9 +25,9 @@ s7-suite is a TypeScript-based Node-RED package for communicating with Siemens S
 
 **Flexible read/write modes** — Single values, combined objects, raw buffers, structured schemas, or unpacked bit arrays.
 
-**Bulk tag import** — Import full PLC tag lists from TIA Portal (`.xlsx`) or Step 7 symbol exports (`.csv`/`.tsv`) into the read node with one click. Auto-detects column names (`name`/`symbol`/`tag` and `address`) and separators (tab/semicolon/comma). Imported tags get human-readable labels used as object keys in the output.
+**Bulk tag import** — Import full PLC tag lists into the read node with one click. Supported files: a TIA Portal tag table Export (`.xlsx`, `.xml` or `.sdf`), SimaticML XML from TIA Portal Openness (`.xml`), Step 7 symbol exports (`.csv`/`.tsv`), and STEP 7 V5 hardware configuration exports (`.cfg`). For CSV and Excel it auto-detects column names (`name`/`symbol`/`tag` and `address`) and separators (tab/semicolon/comma). Imported tags get human-readable labels used as object keys in the output.
 
-**Offline CFG import** — Upload a STEP 7 `.cfg` file (or embedded TIA Portal XML) to discover tags and pick addresses **without a live PLC connection**. Useful for engineering offline, reviewing code, or demoing flows. The browse dialog can switch between `live` and `cfg` source on the fly.
+**Offline CFG import** — Upload a STEP 7 `.cfg` file to discover tags and pick addresses **without a live PLC connection**. Useful for engineering offline, reviewing code, or demoing flows. The browse dialog can switch between `live` and `cfg` source on the fly.
 
 ## Features
 

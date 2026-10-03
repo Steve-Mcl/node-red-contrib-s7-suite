@@ -7,6 +7,7 @@ Sample tag exports for the **Import CSV/Excel** button in the `s7-read` node (ou
 | File | Source / Format | Notes |
 |---|---|---|
 | `sample-tags.csv` | TIA Portal-style export, `;` separator | Matches the initial values of the built-in `sim` backend, so you can import it without a real PLC and see live values immediately |
+| `tia-portal-tag-table-export.xlsx` / `.xml` / `.sdf` | Real exports of one S7-1200 default tag table (20 tags), from TIA Portal's tag table Export button, once per "Save as type" | The `.xml` is TIA's flat `<Tagtable>` format, not SimaticML; the `.sdf` is CSV without a header row. Used by the TIA XML parser tests |
 
 ## Expected columns
 

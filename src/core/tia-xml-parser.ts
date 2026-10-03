@@ -1,12 +1,15 @@
 /**
  * Parser for TIA Portal PLC tag table XML exports.
  *
- * TIA Portal (V13+) replaces the old STEP 7 V5 .cfg format. A tag table is
- * exported via "PLC tags → <table> → Export" and produces an XML file that
- * describes `SW.Tags.PlcTagTable` containers with nested `SW.Tags.PlcTag`
- * and `SW.Tags.PlcUserConstant` records. Each tag has an `AttributeList`
- * (Name, DataTypeName, LogicalAddress) and, optionally, a multilingual
- * `Comment` block.
+ * Two formats are understood:
+ *
+ * - The tag table's own Export button (PLC tags → <table> → Export, "Save as
+ *   type: Xml") writes a flat `<Tagtable name='…'>` with one
+ *   `<Tag type='…' addr='%I0.0' remark='…'>name</Tag>` per tag.
+ * - SimaticML, as written by TIA Portal Openness: `SW.Tags.PlcTagTable`
+ *   containers with nested `SW.Tags.PlcTag` and `SW.Tags.PlcUserConstant`
+ *   records. Each tag has an `AttributeList` (Name, DataTypeName,
+ *   LogicalAddress) and, optionally, a multilingual `Comment` block.
  *
  * TIA-XML is verbose but structurally deterministic — we parse it with a
  * targeted regex+state-machine extractor instead of adding an XML dependency.
@@ -53,6 +56,14 @@ const CULTURE_RE = /<Culture\b[^>]*>([\s\S]*?)<\/Culture>/;
 const TEXT_RE = /<Text\b[^>]*>([\s\S]*?)<\/Text>/;
 const ENGINEERING_RE = /<Engineering\b[^>]*\bversion\s*=\s*"([^"]+)"/;
 
+// TIA Portal's own tag-table Export ("Save as type: Xml") writes a flat format instead:
+//   <Tagtable name='ControllerTagsFolder'>
+//     <Tag type='Bool' addr='%I0.0' remark='' ...>i_start_pb</Tag>
+//   </Tagtable>
+const FLAT_TABLE_RE = /<Tagtable\b([^>]*)>([\s\S]*?)<\/Tagtable>/g;
+const FLAT_TAG_RE = /<Tag\b([^>]*)>([\s\S]*?)<\/Tag>/g;
+const XML_ATTR_RE = /([\w:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+
 /** Locale order when several translations of a comment are present. */
 const PREFERRED_CULTURES = ['de-DE', 'en-US', 'en-GB', 'fr-FR', 'it-IT'];
 
@@ -69,6 +80,17 @@ export function parseTiaXml(content: string): TiaParseResult {
   // exports omit the wrapper.
   const matches = Array.from(content.matchAll(TABLE_RE));
   if (matches.length === 0) {
+    const flatTables = Array.from(content.matchAll(FLAT_TABLE_RE));
+    if (flatTables.length > 0) {
+      for (const t of flatTables) {
+        const tableName = decodeXmlText(parseXmlAttrs(t[1]).name ?? '') || '(unnamed table)';
+        const tags = extractFlatTags(t[2], tableName, warnings);
+        result.tables.push({ name: tableName, tagCount: tags.length });
+        result.tags.push(...tags);
+      }
+      return result;
+    }
+
     const tableBody = content;
     const { tags } = extractTags(tableBody, '(root)', warnings);
     if (tags.length > 0) {
@@ -146,6 +168,37 @@ function extractSingleTag(
     if (value !== undefined) tag.value = value;
   }
   return tag;
+}
+
+function extractFlatTags(body: string, tableName: string, warnings: string[]): TiaTag[] {
+  const tags: TiaTag[] = [];
+  for (const m of body.matchAll(FLAT_TAG_RE)) {
+    const attrs = parseXmlAttrs(m[1]);
+    const name = decodeXmlText(m[2]);
+    if (!name) continue;
+    const address = decodeXmlText(attrs.addr ?? '').replace(/^%/, '');
+    if (!address) {
+      warnings.push(`Tag "${name}" in "${tableName}" has no address — skipping`);
+      continue;
+    }
+    tags.push({
+      name,
+      address,
+      dataTypeName: decodeXmlText(attrs.type ?? ''),
+      comment: decodeXmlText(attrs.remark ?? ''),
+      source: tableName,
+    });
+  }
+  return tags;
+}
+
+/** Attribute map for an XML start tag's attribute text; TIA's flat export uses single quotes. */
+function parseXmlAttrs(attrText: string): Record<string, string> {
+  const attrs: Record<string, string> = {};
+  for (const m of attrText.matchAll(XML_ATTR_RE)) {
+    attrs[m[1]] = m[2] ?? m[3] ?? '';
+  }
+  return attrs;
 }
 
 function extractComment(recordBody: string): string {

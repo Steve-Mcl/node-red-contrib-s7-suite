@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import { parseTiaXml } from '../../../src/core/tia-xml-parser';
 
 const SAMPLE_XML = `<?xml version="1.0" encoding="utf-8"?>
@@ -205,6 +207,54 @@ describe('tia-xml-parser', () => {
       const r = parseTiaXml('<?xml version="1.0"?><Document></Document>');
       expect(r.tables).toHaveLength(0);
       expect(r.tags).toHaveLength(0);
+    });
+  });
+
+  describe("the tag table's own Export (flat <Tagtable> format)", () => {
+    // A real export from TIA Portal: PLC tags > Default tag table > Export > Save as type: Xml
+    const realExport = fs.readFileSync(
+      path.join(__dirname, '../../../test-assets/tag-lists/tia-portal-tag-table-export.xml'),
+      'utf8',
+    );
+
+    it('reads every tag from a real TIA Portal export', () => {
+      const r = parseTiaXml(realExport);
+      expect(r.tables).toEqual([{ name: 'ControllerTagsFolder', tagCount: 20 }]);
+      expect(r.tags).toHaveLength(20);
+      expect(r.warnings).toEqual([]);
+      expect(r.tags[0]).toEqual({
+        name: 'i_start_pb',
+        address: 'I0.0',
+        dataTypeName: 'Bool',
+        comment: '',
+        source: 'ControllerTagsFolder',
+      });
+      expect(r.tags.map((t) => t.address)).toEqual(expect.arrayContaining(['Q0.0', 'MW10', 'MB101', 'M100.7']));
+    });
+
+    it('handles double quotes, entities, comments and several tables', () => {
+      const xml = `<?xml version="1.0" encoding="utf-8"?>
+<Tagtables>
+  <Tagtable name="Motors &amp; pumps">
+    <Tag type="Real" addr="%MD20" remark="Speed &lt;rpm&gt;">Motor_&quot;A&quot;</Tag>
+  </Tagtable>
+  <Tagtable name='Valves'>
+    <Tag type='Bool' addr='%Q1.2' remark=''>Valve_1</Tag>
+  </Tagtable>
+</Tagtables>`;
+      const r = parseTiaXml(xml);
+      expect(r.tables).toEqual([
+        { name: 'Motors & pumps', tagCount: 1 },
+        { name: 'Valves', tagCount: 1 },
+      ]);
+      expect(r.tags[0]).toMatchObject({ name: 'Motor_"A"', address: 'MD20', dataTypeName: 'Real', comment: 'Speed <rpm>' });
+      expect(r.tags[1]).toMatchObject({ name: 'Valve_1', address: 'Q1.2', source: 'Valves' });
+    });
+
+    it('skips a tag without an address and says so', () => {
+      const r = parseTiaXml("<Tagtable name='T'><Tag type='Bool' addr=''>NoAddr</Tag><Tag type='Bool' addr='%I0.1'>Ok</Tag></Tagtable>");
+      expect(r.tags.map((t) => t.name)).toEqual(['Ok']);
+      expect(r.warnings).toEqual([expect.stringContaining('NoAddr')]);
     });
   });
 });
