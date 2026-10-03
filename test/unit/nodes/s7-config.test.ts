@@ -42,6 +42,10 @@ describe('s7-config node', () => {
     auth: {
       needsPermission: jest.fn(() => (_req: unknown, _res: unknown, next: () => void) => next()),
     },
+    util: {
+      // Node-RED resolves 'env' from flow/global env vars, then the process environment
+      evaluateNodeProperty: jest.fn((value: string, type: string) => (type === 'env' ? process.env[value] : value)),
+    },
   };
 
   beforeEach(() => {
@@ -157,6 +161,129 @@ describe('s7-config node', () => {
       expect(nodeContext.s7Config.host).toBe('192.168.0.1');
       expect(nodeContext.s7Config.port).toBe(102);
       expect(nodeContext.s7Config.backend).toBe('nodes7');
+    });
+
+    describe('numeric fields from environment variables', () => {
+      const makeNode = () => Object.assign(new EventEmitter(), { log: jest.fn(), warn: jest.fn(), error: jest.fn(), status: jest.fn() });
+      const base = { id: 'cfgEnv', type: 's7-config', name: 'env', host: '192.168.1.100', plcType: 'S7-300', backend: 'nodes7' };
+
+      beforeEach(() => {
+        process.env.S7_TEST_PORT = '10102';
+        process.env.S7_TEST_SLOT = '3';
+        process.env.S7_TEST_TIMEOUT = '7000';
+        process.env.S7_TEST_BAD = 'abc';
+        delete process.env.S7_TEST_MISSING;
+      });
+
+      afterEach(() => {
+        delete process.env.S7_TEST_PORT;
+        delete process.env.S7_TEST_SLOT;
+        delete process.env.S7_TEST_TIMEOUT;
+        delete process.env.S7_TEST_BAD;
+      });
+
+      it('reads env-typed fields from the environment', () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const node: any = makeNode();
+        constructorFn.call(node, {
+          ...base,
+          port: 'S7_TEST_PORT', portType: 'env',
+          rack: 0, rackType: 'num',
+          slot: 'S7_TEST_SLOT', slotType: 'env',
+          requestTimeout: 'S7_TEST_TIMEOUT', requestTimeoutType: 'env',
+        });
+
+        expect(node.s7Config.port).toBe(10102);
+        expect(node.s7Config.rack).toBe(0);
+        // env slot wins over the S7-300 default slot (2)
+        expect(node.s7Config.slot).toBe(3);
+        expect(node.s7Config.requestTimeout).toBe(7000);
+        expect(node.error).not.toHaveBeenCalled();
+        node.emit('close', () => undefined);
+      });
+
+      it('reports an unset variable instead of falling back to the default', async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const node: any = makeNode();
+        (createBackend as jest.Mock).mockClear();
+        constructorFn.call(node, { ...base, port: 'S7_TEST_MISSING', portType: 'env', rack: 0, slot: 2 });
+        await new Promise((resolve) => setTimeout(resolve, 10));
+
+        expect(node.error).toHaveBeenCalledWith(
+          'Invalid S7 config: port: environment variable "S7_TEST_MISSING" is not set',
+        );
+        expect(node.connectionManager.getState()).toBe('disconnected');
+      });
+
+      it('reads host and TSAPs from the environment (TSAP still parsed as hex)', () => {
+        process.env.S7_TEST_HOST = '10.1.2.3';
+        process.env.S7_TEST_LTSAP = '0x0100';
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const node: any = makeNode();
+          constructorFn.call(node, {
+            ...base, port: 102, rack: 0, slot: 2,
+            host: 'S7_TEST_HOST', hostType: 'env',
+            localTSAP: 'S7_TEST_LTSAP', localTSAPType: 'env',
+            remoteTSAP: '0x0200', remoteTSAPType: 'str',
+          });
+
+          expect(node.s7Config.host).toBe('10.1.2.3');
+          expect(node.s7Config.localTSAP).toBe(0x0100);
+          expect(node.s7Config.remoteTSAP).toBe(0x0200);
+          expect(node.error).not.toHaveBeenCalled();
+          node.emit('close', () => undefined);
+        } finally {
+          delete process.env.S7_TEST_HOST;
+          delete process.env.S7_TEST_LTSAP;
+        }
+      });
+
+      it('reports an unset host variable', () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const node: any = makeNode();
+        constructorFn.call(node, { ...base, host: 'S7_TEST_MISSING', hostType: 'env', port: 102, rack: 0, slot: 2 });
+
+        expect(node.error).toHaveBeenCalledWith(
+          'Invalid S7 config: host: environment variable "S7_TEST_MISSING" is not set',
+        );
+      });
+
+      it('reports a variable that is not a number', () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const node: any = makeNode();
+        constructorFn.call(node, { ...base, port: 102, rack: 'S7_TEST_BAD', rackType: 'env', slot: 2 });
+
+        expect(node.error).toHaveBeenCalledWith(
+          'Invalid S7 config: rack: environment variable "S7_TEST_BAD" is "abc", not a number',
+        );
+      });
+
+      it('rejects a negative timeout, including one from an environment variable', () => {
+        process.env.S7_TEST_NEG = '-5';
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const node: any = makeNode();
+          constructorFn.call(node, { ...base, port: 102, rack: 0, slot: 2, requestTimeout: 'S7_TEST_NEG', requestTimeoutType: 'env' });
+
+          expect(node.error).toHaveBeenCalledWith(
+            'Invalid S7 config: invalid requestTimeout: -5 (expected a whole number of ms, 1 or more)',
+          );
+        } finally {
+          delete process.env.S7_TEST_NEG;
+        }
+      });
+
+      it('treats fields without a type as numbers, as before', () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const node: any = makeNode();
+        constructorFn.call(node, { ...base, port: '1102', rack: '0', slot: '2' });
+
+        expect(node.s7Config.port).toBe(1102);
+        expect(node.s7Config.slot).toBe(2);
+        expect(mockRED.util.evaluateNodeProperty).not.toHaveBeenCalled();
+        node.emit('close', () => undefined);
+      });
     });
 
     it('calls connect on initialization', async () => {

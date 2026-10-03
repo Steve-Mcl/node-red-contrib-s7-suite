@@ -166,32 +166,78 @@
     }
   };
 
+  // Validator for a num/env TypedInput: a whole number in [min, max], or an environment
+  // variable name. RED.validators.typedInput('...Type') alone accepts any number, negatives
+  // and fractions included. Returns a boolean: Node-RED 2.x treats a returned string as valid.
+  window.s7SuiteNumberField = function (typeField, min, max) {
+    return function (v) {
+      var type = $('#node-config-input-' + typeField).val() || this[typeField] || 'num';
+      var text = String(v === undefined || v === null ? '' : v).trim();
+      if (type === 'env') return text !== '';
+      var n = Number(text);
+      return text !== '' && Number.isInteger(n) && n >= min && n <= max;
+    };
+  };
+
   // ===== Config node registration =====
   RED.nodes.registerType('s7-config', {
     category: 'config',
     defaults: {
       name: { value: '' },
-      host: { value: '192.168.0.1', required: true },
-      port: { value: 102, required: true, validate: RED.validators.number() },
-      rack: { value: 0, required: true, validate: RED.validators.number() },
-      slot: { value: 1, required: true, validate: RED.validators.number() },
+      host: { value: '192.168.0.1', required: true, validate: RED.validators.typedInput('hostType', true) },
+      hostType: { value: 'str' },
+      port: { value: 102, required: true, validate: s7SuiteNumberField('portType', 1, 65535) },
+      portType: { value: 'num' },
+      rack: { value: 0, required: true, validate: s7SuiteNumberField('rackType', 0, 7) },
+      rackType: { value: 'num' },
+      slot: { value: 1, required: true, validate: s7SuiteNumberField('slotType', 0, 31) },
+      slotType: { value: 'num' },
       plcType: { value: 'S7-1200' },
       backend: { value: 'nodes7' },
       localTSAP: { value: '' },
+      localTSAPType: { value: 'str' },
       remoteTSAP: { value: '' },
-      connectionTimeout: { value: 5000, validate: RED.validators.number() },
-      requestTimeout: { value: 3000, validate: RED.validators.number() },
-      reconnectInterval: { value: 1000, validate: RED.validators.number() },
-      maxReconnectInterval: { value: 30000, validate: RED.validators.number() },
+      remoteTSAPType: { value: 'str' },
+      connectionTimeout: { value: 5000, validate: s7SuiteNumberField('connectionTimeoutType', 1, Number.MAX_SAFE_INTEGER) },
+      connectionTimeoutType: { value: 'num' },
+      requestTimeout: { value: 3000, validate: s7SuiteNumberField('requestTimeoutType', 1, Number.MAX_SAFE_INTEGER) },
+      requestTimeoutType: { value: 'num' },
+      reconnectInterval: { value: 1000, validate: s7SuiteNumberField('reconnectIntervalType', 1, Number.MAX_SAFE_INTEGER) },
+      reconnectIntervalType: { value: 'num' },
+      maxReconnectInterval: { value: 30000, validate: s7SuiteNumberField('maxReconnectIntervalType', 1, Number.MAX_SAFE_INTEGER) },
+      maxReconnectIntervalType: { value: 'num' },
       debug: { value: false }
     },
     credentials: {
       password: { type: 'password' }
     },
     label: function () {
-      return this.name || this.host + ':' + this.port;
+      var show = function (value, type) { return type === 'env' ? '${' + value + '}' : value; };
+      return this.name || show(this.host, this.hostType) + ':' + show(this.port, this.portType);
     },
     oneditprepare: function () {
+      var node = this;
+      var defaults = RED.nodes.getType('s7-config').defaults;
+      // Each setting takes a value or the name of an environment variable
+      var fields = {
+        host: 'str', localTSAP: 'str', remoteTSAP: 'str',
+        port: 'num', rack: 'num', slot: 'num',
+        connectionTimeout: 'num', requestTimeout: 'num', reconnectInterval: 'num', maxReconnectInterval: 'num'
+      };
+      Object.keys(fields).forEach(function (field) {
+        var input = $('#node-config-input-' + field);
+        // Node-RED doesn't copy falsy defaults (rack: 0) onto a new config node, so the
+        // field would start empty; fill it from the definition instead
+        if (node[field] === undefined && defaults[field].value !== undefined) {
+          input.val(defaults[field].value);
+        }
+        input.typedInput({
+          default: fields[field],
+          types: [fields[field], 'env'],
+          typeField: '#node-config-input-' + field + 'Type'
+        });
+      });
+
       var plcDefaults = {};
       $.getJSON('s7-suite/plc-defaults', function (data) {
         plcDefaults = data;
@@ -203,8 +249,10 @@
       });
       $('#node-config-input-plcType').on('change', function () {
         var plcType = $(this).val();
-        if (plcDefaults[plcType] !== undefined) {
-          $('#node-config-input-slot').val(plcDefaults[plcType]);
+        // Only replace a numeric slot; leave an environment variable alone
+        var slotInput = $('#node-config-input-slot');
+        if (plcDefaults[plcType] !== undefined && slotInput.typedInput('type') === 'num') {
+          slotInput.typedInput('value', plcDefaults[plcType]);
         }
         $('.tsap-row').show();
       });
@@ -227,17 +275,32 @@
 </script>
 
 <script type="text/html" data-template-name="s7-config">
+  <style>
+    /* Room for the longer labels ("Max Reconnect (ms)") without wrapping. The typedInputs take
+       their width from the inline style on each input, so plain inputs and selects match it here */
+    .s7c-form .form-row > label { width: 150px; white-space: nowrap; }
+    .s7c-form .form-row > input[type="text"]:not(.red-ui-typedInput),
+    .s7c-form .form-row > input[type="password"],
+    .s7c-form .form-row > select { width: calc(100% - 155px); }
+    /* Tips sit under the field they describe, in the input column. Node-RED sizes the edit tray
+       from its content's natural width when it opens, so width:0 keeps the tip text out of that
+       sum; min-width then stretches the tip to the input column once the tray width is set */
+    .s7c-form .s7c-tip { box-sizing: border-box; width: 0; min-width: calc(100% - 155px); max-width: none; margin: -6px 0 16px 155px; }
+  </style>
+  <div class="s7c-form">
   <div class="form-row">
     <label for="node-config-input-name"><i class="fa fa-tag"></i> Name</label>
     <input type="text" id="node-config-input-name" placeholder="Name">
   </div>
   <div class="form-row">
     <label for="node-config-input-host"><i class="fa fa-globe"></i> Host</label>
-    <input type="text" id="node-config-input-host" placeholder="192.168.0.1">
+    <input type="text" id="node-config-input-host" placeholder="192.168.0.1" style="width: calc(100% - 155px);">
+    <input type="hidden" id="node-config-input-hostType">
   </div>
   <div class="form-row">
     <label for="node-config-input-port"><i class="fa fa-plug"></i> Port</label>
-    <input type="number" id="node-config-input-port" placeholder="102">
+    <input type="text" id="node-config-input-port" placeholder="102" style="width: calc(100% - 155px);">
+    <input type="hidden" id="node-config-input-portType">
   </div>
   <div class="form-row">
     <label for="node-config-input-plcType"><i class="fa fa-microchip"></i> PLC Type</label>
@@ -252,11 +315,13 @@
   </div>
   <div class="form-row">
     <label for="node-config-input-rack"><i class="fa fa-server"></i> Rack</label>
-    <input type="number" id="node-config-input-rack" placeholder="0">
+    <input type="text" id="node-config-input-rack" placeholder="0" style="width: calc(100% - 155px);">
+    <input type="hidden" id="node-config-input-rackType">
   </div>
   <div class="form-row">
     <label for="node-config-input-slot"><i class="fa fa-th"></i> Slot</label>
-    <input type="number" id="node-config-input-slot" placeholder="1">
+    <input type="text" id="node-config-input-slot" placeholder="1" style="width: calc(100% - 155px);">
+    <input type="hidden" id="node-config-input-slotType">
   </div>
   <div class="form-row">
     <label for="node-config-input-backend"><i class="fa fa-cogs"></i> Backend</label>
@@ -266,20 +331,19 @@
       <option value="snap7">snap7 &mdash; native C, fast, block listing &amp; SZL reads</option>
     </select>
   </div>
-  <div id="snap7-warning" class="form-row" style="display:none;">
-    <div class="form-tips"><i class="fa fa-warning"></i> <b>node-snap7</b> is not installed. It is an optional native C library that requires a C compiler to build.<br>
+  <div id="snap7-warning" class="form-tips s7c-tip" style="display:none;"><i class="fa fa-warning"></i> <b>node-snap7</b> is not installed. It is an optional native C library that requires a C compiler to build.<br>
     Install: <code>npm install node-snap7</code><br>
     <small>If compilation fails, install build tools first (e.g. <code>apt install build-essential</code> on Debian/Ubuntu).<br>
-    Without snap7, use the <b>nodes7</b> backend instead &mdash; it supports the same Read/Write/Trigger features, only block listing and SZL reads are unavailable.</small></div>
+    Without snap7, use the <b>nodes7</b> backend instead &mdash; it supports the same Read/Write/Trigger features, only block listing and SZL reads are unavailable.</small>
   </div>
-  <div id="backend-info" class="form-row" style="margin-left:20px;">
-    <div id="backend-info-sim" class="form-tips" style="display:none;">
+  <div id="backend-info">
+    <div id="backend-info-sim" class="form-tips s7c-tip" style="display:none;">
       <b>Simulator:</b> Generates dynamic test data (sine wave, counter, sawtooth) without a real PLC. Useful for flow development and testing.
     </div>
-    <div id="backend-info-nodes7" class="form-tips" style="display:none;">
+    <div id="backend-info-nodes7" class="form-tips s7c-tip" style="display:none;">
       <b>nodes7:</b> Pure JavaScript &mdash; works on any platform without compilation. Supports all Read/Write/Trigger operations. Browse uses probe-based discovery (slower). Does not support block listing or SZL reads.
     </div>
-    <div id="backend-info-snap7" class="form-tips" style="display:none;">
+    <div id="backend-info-snap7" class="form-tips s7c-tip" style="display:none;">
       <b>snap7:</b> Native C library via node-snap7 &mdash; supports all features including fast block listing, SZL reads, and CPU diagnostics. Requires a C compiler for installation.
     </div>
   </div>
@@ -287,37 +351,44 @@
     <label for="node-config-input-password"><i class="fa fa-lock"></i> Password</label>
     <input type="password" id="node-config-input-password" placeholder="Session password (optional)">
   </div>
-  <div class="form-tips" style="margin-left:20px;">
+  <div class="form-tips s7c-tip">
     <small>PLC session password. Only used with the <b>snap7</b> backend.</small>
   </div>
   <div class="form-row tsap-row">
     <label for="node-config-input-localTSAP"><i class="fa fa-exchange"></i> Local TSAP</label>
-    <input type="text" id="node-config-input-localTSAP" placeholder="0x0100">
+    <input type="text" id="node-config-input-localTSAP" placeholder="0x0100" style="width: calc(100% - 155px);">
+    <input type="hidden" id="node-config-input-localTSAPType">
   </div>
   <div class="form-row tsap-row">
     <label for="node-config-input-remoteTSAP"><i class="fa fa-exchange"></i> Remote TSAP</label>
-    <input type="text" id="node-config-input-remoteTSAP" placeholder="0x0200">
+    <input type="text" id="node-config-input-remoteTSAP" placeholder="0x0200" style="width: calc(100% - 155px);">
+    <input type="hidden" id="node-config-input-remoteTSAPType">
   </div>
   <div class="form-row">
     <label for="node-config-input-connectionTimeout"><i class="fa fa-clock-o"></i> Conn. Timeout (ms)</label>
-    <input type="number" id="node-config-input-connectionTimeout" placeholder="5000">
+    <input type="text" id="node-config-input-connectionTimeout" placeholder="5000" style="width: calc(100% - 155px);">
+    <input type="hidden" id="node-config-input-connectionTimeoutType">
   </div>
   <div class="form-row">
     <label for="node-config-input-requestTimeout"><i class="fa fa-clock-o"></i> Req. Timeout (ms)</label>
-    <input type="number" id="node-config-input-requestTimeout" placeholder="3000">
+    <input type="text" id="node-config-input-requestTimeout" placeholder="3000" style="width: calc(100% - 155px);">
+    <input type="hidden" id="node-config-input-requestTimeoutType">
   </div>
   <div class="form-row">
     <label for="node-config-input-reconnectInterval"><i class="fa fa-refresh"></i> Reconnect (ms)</label>
-    <input type="number" id="node-config-input-reconnectInterval" placeholder="1000">
+    <input type="text" id="node-config-input-reconnectInterval" placeholder="1000" style="width: calc(100% - 155px);">
+    <input type="hidden" id="node-config-input-reconnectIntervalType">
   </div>
   <div class="form-row">
     <label for="node-config-input-maxReconnectInterval"><i class="fa fa-refresh"></i> Max Reconnect (ms)</label>
-    <input type="number" id="node-config-input-maxReconnectInterval" placeholder="30000">
+    <input type="text" id="node-config-input-maxReconnectInterval" placeholder="30000" style="width: calc(100% - 155px);">
+    <input type="hidden" id="node-config-input-maxReconnectIntervalType">
   </div>
   <div class="form-row">
     <label for="node-config-input-debug" style="width:auto;"><i class="fa fa-bug"></i> Debug logging</label>
     <input type="checkbox" id="node-config-input-debug" style="display:inline-block; width:auto; vertical-align:top;">
     <span style="color:#888; font-size:0.85em;">Logs raw protocol traffic (nodes7) to stdout. Leave off for normal use.</span>
+  </div>
   </div>
 </script>
 
@@ -325,12 +396,14 @@
   <p>Configuration node for Siemens S7 PLC connections.</p>
   <h3>Properties</h3>
   <dl class="message-properties">
-    <dt>Host <span class="property-type">string</span></dt>
+    <dt>Host <span class="property-type">string | env</span></dt>
     <dd>IP address or hostname of the PLC</dd>
-    <dt>Port <span class="property-type">number</span></dt>
+    <dt>Port <span class="property-type">number | env</span></dt>
     <dd>TCP port (default: 102)</dd>
-    <dt>Rack / Slot <span class="property-type">number</span></dt>
-    <dd>PLC rack and slot numbers. Slot is auto-set based on PLC type.</dd>
+    <dt>Rack / Slot <span class="property-type">number | env</span></dt>
+    <dd>PLC rack and slot numbers. Choosing a PLC type fills in its usual slot, unless the slot is set from an environment variable.</dd>
+    <dt>Environment variables</dt>
+    <dd>Host, port, rack, slot, the TSAPs, timeouts and reconnect intervals can each be set directly or, by switching the field to <b>env</b>, from the named environment variable (Node-RED's global or flow environment variables, or the process environment). An unset variable, or a non-numeric one for a numeric field, stops the connection and is reported as a config error rather than falling back to a default.</dd>
     <dt>PLC Type <span class="property-type">select</span></dt>
     <dd>S7-200, S7-300, S7-400, S7-1200, S7-1500, or LOGO</dd>
     <dt>Backend <span class="property-type">select</span></dt>
