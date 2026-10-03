@@ -14,6 +14,23 @@ export enum S7ErrorCode {
   CONTROL_FAILED = 'CONTROL_FAILED',
 }
 
+/**
+ * Readable text for whatever a PLC library passed as its error. nodes7 and node-snap7 often
+ * pass a string, a boolean or a numeric code rather than an Error.
+ */
+export function describeError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  return String(err);
+}
+
+const RAW_AREA_NAMES: Record<number, string> = { 0x81: 'I', 0x82: 'Q', 0x83: 'M', 0x1c: 'C', 0x1d: 'T' };
+
+/** Describes a raw area request for error messages, e.g. "8 bytes at DB1 offset 200". */
+export function describeRawRequest(area: number, dbNumber: number, start: number, length: number): string {
+  const where = area === 0x84 ? `DB${dbNumber}` : `area ${RAW_AREA_NAMES[area] ?? `0x${area.toString(16)}`}`;
+  return `${length} byte${length === 1 ? '' : 's'} at ${where} offset ${start}`;
+}
+
 export class S7Error extends Error {
   constructor(
     public readonly code: S7ErrorCode,

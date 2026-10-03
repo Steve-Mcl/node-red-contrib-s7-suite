@@ -64,6 +64,18 @@ describe('NodeS7Backend', () => {
       ).rejects.toThrow('nodes7 connection failed');
     });
 
+    it('includes a string connect error from nodes7 in the message', async () => {
+      mockInitiateConnection.mockImplementation((_params: unknown, cb: Function) =>
+        cb("Error - TCP connected, ISO didn't"),
+      );
+
+      await expect(
+        backend.connect({
+          host: '192.168.1.100', port: 102, rack: 0, slot: 1, plcType: 'S7-1200', backend: 'nodes7',
+        }),
+      ).rejects.toThrow("nodes7 connection failed: Error - TCP connected, ISO didn't");
+    });
+
     it('constructs nodes7 in silent mode by default (no verbose protocol logging)', async () => {
       mockInitiateConnection.mockImplementation((_params: unknown, cb: Function) => cb());
 
@@ -160,6 +172,38 @@ describe('NodeS7Backend', () => {
       ).rejects.toThrow('nodes7 read failed');
     });
 
+    it('names the addresses nodes7 marked bad (it passes true, not an Error)', async () => {
+      mockReadAllItems.mockImplementation((cb: Function) => {
+        cb(true, { 'DB1,REAL0': 3.14, 'DB6,REAL0': 'BAD 255', 'DB1,BYTE0.4': ['BAD 255', 'BAD 255'] });
+      });
+
+      const read = backend.read(
+        ['DB1,REAL0', 'DB6,REAL0', 'DB1,BYTE0.4'].map((a) => ({
+          name: a,
+          address: { area: 'DB' as const, dbNumber: 1, dataType: 'REAL' as const, offset: 0, bitOffset: 0 },
+          nodes7Address: a,
+        })),
+      );
+
+      await expect(read).rejects.toThrow(
+        'nodes7 read failed: bad quality for DB6,REAL0, DB1,BYTE0.4 (check that the address exists',
+      );
+    });
+
+    it('does not mistake a good string value for a bad quality', async () => {
+      mockReadAllItems.mockImplementation((cb: Function) => {
+        cb(true, { 'DB1,STRING0.10': 'BAD BATCH', 'DB6,REAL0': 'BAD 10' });
+      });
+
+      await expect(
+        backend.read(['DB1,STRING0.10', 'DB6,REAL0'].map((a) => ({
+          name: a,
+          address: { area: 'DB' as const, dbNumber: 1, dataType: 'STRING' as const, offset: 0, bitOffset: 0 },
+          nodes7Address: a,
+        }))),
+      ).rejects.toThrow(/bad quality for DB6,REAL0 \(/);
+    });
+
     it('throws when not connected', async () => {
       await backend.disconnect();
       await expect(
@@ -213,6 +257,27 @@ describe('NodeS7Backend', () => {
           },
         ]),
       ).rejects.toThrow('nodes7 write failed');
+    });
+
+    it('names the written addresses when nodes7 reports bad quality', async () => {
+      mockWriteItems.mockImplementation((_n: unknown, _v: unknown, cb: Function) => cb(true));
+
+      await expect(
+        backend.write([
+          {
+            name: 'a',
+            address: { area: 'DB', dbNumber: 6, dataType: 'INT', offset: 0, bitOffset: 0 },
+            nodes7Address: 'DB6,INT0',
+            value: 1,
+          },
+          {
+            name: 'b',
+            address: { area: 'DB', dbNumber: 6, dataType: 'INT', offset: 2, bitOffset: 0 },
+            nodes7Address: 'DB6,INT2',
+            value: 2,
+          },
+        ]),
+      ).rejects.toThrow('nodes7 write failed: bad quality for DB6,INT0, DB6,INT2 (');
     });
   });
 

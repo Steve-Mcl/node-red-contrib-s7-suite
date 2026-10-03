@@ -97,6 +97,26 @@ describe('NodeS7Backend - rawArea and edge cases', () => {
     await expect(backend.readRawArea(0x84, 1, 0, 1)).rejects.toThrow('Raw read failed');
   });
 
+  it('readRawArea describes the request when nodes7 reports bad quality', async () => {
+    mockReadAllItems.mockImplementation((cb: Function) => {
+      cb(true, { 'DB1,BYTE200.8': Array(8).fill('BAD 255') });
+    });
+
+    await expect(backend.readRawArea(0x84, 1, 200, 8)).rejects.toThrow(
+      'Raw read failed: bad quality reading 8 bytes at DB1 offset 200 (',
+    );
+  });
+
+  it('readRawArea names a non-DB area and a single byte', async () => {
+    mockReadAllItems.mockImplementation((cb: Function) => {
+      cb(true, { 'MB300.1': 'BAD 255' });
+    });
+
+    await expect(backend.readRawArea(0x83, 0, 300, 1)).rejects.toThrow(
+      'Raw read failed: bad quality reading 1 byte at area M offset 300 (',
+    );
+  });
+
   it('readRawArea throws when not connected', async () => {
     await backend.disconnect();
     await expect(backend.readRawArea(0x84, 1, 0, 1)).rejects.toThrow('Not connected');
