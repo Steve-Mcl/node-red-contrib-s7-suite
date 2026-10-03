@@ -92,9 +92,11 @@
     oneditsave: function () {
       var mode = $('#node-input-mode').val();
 
-      // For struct mode, sync address from struct address input and save schema
+      // For struct mode, sync address from struct address input and save schema.
+      // Write it into #node-input-address rather than this.address: Node-RED applies that
+      // (single-mode) field after oneditsave, which would otherwise restore the old address.
       if (mode === 'struct') {
-        this.address = ($('#s7w-struct-address').val() || '').trim();
+        $('#node-input-address').val(($('#s7w-struct-address').val() || '').trim());
 
         var schemaItems = $('#s7w-schema-list').editableList('items');
         var schema = [];
@@ -174,8 +176,6 @@
       <p>Uses read-modify-write to preserve bits not being written. Schema can be overridden at runtime via <code>msg.schema</code>.</p>
     </div>
   </div>
-  <!-- Hidden fields -->
-  <input type="hidden" id="node-input-schema">
   <div id="s7w-browse-dialog" style="display:none;border:1px solid #ccc;border-radius:4px;padding:8px;margin-top:8px;background:#fafafa;max-height:400px;overflow:hidden;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
       <b><i class="fa fa-sitemap"></i> PLC Address Browser</b>
