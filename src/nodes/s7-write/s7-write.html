@@ -229,6 +229,9 @@
     <li><b>nodes7:</b> <code>DB1,REAL0</code>, <code>DB1,BOOL0.0</code>, <code>DB1,INT4</code></li>
     <li><b>IEC:</b> <code>DB1.DBD0</code>, <code>DB1.DBX0.0</code>, <code>DB1.DBW4</code></li>
     <li><b>Area:</b> <code>MW0</code>, <code>Q0.0</code>, <code>IB2</code></li>
+    <li><b>Count:</b> after the offset, a BOOL takes a bit and then a count of bits (<code>DB1,BOOL10.3</code>,
+      <code>DB1,BOOL10.3.8</code>); any other type takes a count, as in nodes7 (<code>DB1,BYTE10.4</code> or
+      <code>DB1,BYTE10.0.4</code> is 4 bytes, <code>QB0.4</code> 4 output bytes). A bit offset on any other type is an error.</li>
   </ul>
   <h4>Data Type Mapping</h4>
   <ul>

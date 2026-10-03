@@ -508,7 +508,7 @@
     <b>.cfg import</b> reads the full hardware config exported from SIMATIC Manager via <em>Station → Export…</em> and extracts all symbolic I/O — including modules behind Profibus/Profinet couplers that a live browse cannot discover. Digital inputs/outputs become <code>I0.3</code>/<code>Q0.3</code> addresses, analog channels become <code>IW272</code>/<code>QW272</code>.<br>
     <b>TIA Portal .xml import</b> reads a PLC tag-table exported from TIA Portal (V13+) via <em>PLC tags → &lt;table&gt; → Export</em>. Multilingual comments prefer <code>de-DE</code>, then <code>en-US</code>. User constants (no address) are skipped.</dd>
     <dt>Raw Buffer</dt>
-    <dd>Reads N bytes and returns a Node.js Buffer. Address format: <code>DB1,BYTE0.0.100</code> (100 bytes from offset 0). Useful for JSON strings in DBs or custom binary parsing.</dd>
+    <dd>Reads N bytes and returns a Node.js Buffer. Address format: <code>DB1,BYTE0.0.100</code> or <code>DB1,BYTE0.100</code> (100 bytes from offset 0). Useful for JSON strings in DBs or custom binary parsing.</dd>
     <dt>Struct (schema)</dt>
     <dd>Reads a raw buffer area and extracts typed fields according to a schema. Each field specifies name, data type, and byte offset. Example schema:
     <pre>[{"name":"temp","type":"REAL","offset":0},
@@ -516,6 +516,6 @@
  {"name":"active","type":"BOOL","offset":6,"bit":0}]</pre>
     Returns: <code>{"temp":23.5,"count":42,"active":true}</code></dd>
     <dt>Bit Array</dt>
-    <dd>Reads N bytes and returns an array of booleans (LSB first per byte). Address format: <code>DB1,BYTE0.0.2</code> (2 bytes = 16 bits). Useful for status words and bitmasks.</dd>
+    <dd>Reads N bytes and returns an array of booleans (LSB first per byte). Address format: <code>DB1,BYTE0.0.2</code> or <code>DB1,BYTE0.2</code> (2 bytes = 16 bits). Useful for status words and bitmasks.</dd>
   </dl>
 </script>

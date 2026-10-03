@@ -112,6 +112,35 @@ function validateAddress(addr: S7Address, raw: string): void {
   if (addr.dataType === 'BOOL' && (addr.bitOffset < 0 || addr.bitOffset > 7)) {
     throw new S7Error(S7ErrorCode.INVALID_ADDRESS, `Bit offset must be 0-7 for BOOL in address: "${raw}"`);
   }
+  if (addr.arrayLength !== undefined && addr.arrayLength < 1) {
+    throw new S7Error(S7ErrorCode.INVALID_ADDRESS, `Count must be at least 1 in address: "${raw}"`);
+  }
+}
+
+/**
+ * What the numbers after the offset mean depends on the type, as in nodes7 and st-one's parser.
+ * For a bit, the first is the bit (0 to 7) and a second is a count of bits (`DB1,BOOL10.3.8`).
+ * For anything else a single number is a count (`DB1,BYTE10.4`, `QB0.4`), and s7-suite's own
+ * `.0.N` form is a count too. A non-zero bit on a non-bit type is refused rather than ignored.
+ */
+function parseSuffix(
+  isBit: boolean, first: string | undefined, second: string | undefined, raw: string,
+): { bitOffset: number; arrayLength?: number } {
+  const a = first !== undefined ? parseInt(first, 10) : undefined;
+  const b = second !== undefined ? parseInt(second, 10) : undefined;
+  if (isBit) {
+    if (a === undefined && b !== undefined) {
+      throw new S7Error(S7ErrorCode.INVALID_ADDRESS, `Bit offset must be 0-7 for BOOL in address: "${raw}"`);
+    }
+    return { bitOffset: a ?? 0, arrayLength: b };
+  }
+  if (a !== undefined && b !== undefined && a !== 0) {
+    throw new S7Error(
+      S7ErrorCode.INVALID_ADDRESS,
+      `Only a BOOL takes a bit offset; for ${b} values write .${b} in address: "${raw}"`,
+    );
+  }
+  return { bitOffset: 0, arrayLength: b ?? a };
 }
 
 function tryParseNodes7Style(input: string): S7Address | null {
@@ -121,8 +150,11 @@ function tryParseNodes7Style(input: string): S7Address | null {
   const dbNumber = parseInt(match[2], 10);
   const dataType = match[3].toUpperCase() as S7DataType;
   const offset = parseInt(match[4], 10);
-  const bitOffset = match[5] !== undefined ? parseInt(match[5], 10) : 0;
-  const arrayLength = match[6] !== undefined ? parseInt(match[6], 10) : undefined;
+  // A string's suffix is its length, not a bit or a count; leave that to the string handling
+  const isString = dataType === 'STRING' || dataType === 'WSTRING';
+  const { bitOffset, arrayLength } = isString
+    ? { bitOffset: 0, arrayLength: match[6] !== undefined ? parseInt(match[6], 10) : undefined }
+    : parseSuffix(dataType === 'BOOL', match[5], match[6], input);
 
   return {
     area: 'DB',
@@ -145,6 +177,9 @@ function tryParseIECStyle(input: string): S7Address | null {
 
   const offset = parseInt(match[4], 10);
   const bitOffset = match[5] !== undefined ? parseInt(match[5], 10) : 0;
+  if (dataType !== 'BOOL' && bitOffset !== 0) {
+    throw new S7Error(S7ErrorCode.INVALID_ADDRESS, `Only DBX takes a bit offset in address: "${input}"`);
+  }
 
   return {
     area: 'DB',
@@ -165,8 +200,6 @@ function tryParseAreaStyle(input: string): S7Address | null {
 
   const sizeLetter = match[2]?.toUpperCase();
   const offset = parseInt(match[3], 10);
-  const bitOffset = match[4] !== undefined ? parseInt(match[4], 10) : 0;
-  const arrayLength = match[5] !== undefined ? parseInt(match[5], 10) : undefined;
 
   let dataType: S7DataType;
   if (sizeLetter) {
@@ -181,6 +214,9 @@ function tryParseAreaStyle(input: string): S7Address | null {
   if ((area === 'C' || area === 'T') && !sizeLetter && match[4] === undefined) {
     dataType = 'WORD';
   }
+
+  // Q0.1 is a bit; QB0.4 is 4 bytes
+  const { bitOffset, arrayLength } = parseSuffix(dataType === 'BOOL', match[4], match[5], input);
 
   return {
     area,

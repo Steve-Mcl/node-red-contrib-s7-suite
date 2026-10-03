@@ -75,6 +75,41 @@ describe('address-parser', () => {
       expect(addr.offset).toBe(10);
     });
 
+    describe('the numbers after the offset depend on the type', () => {
+      it.each([
+        ['DB1,BYTE10.4', 4], ['DB1,REAL0.3', 3], ['DB1,BYTE10.12', 12], ['DB1,BYTE10.0.4', 4], ['DB1,INT0.0.3', 3],
+      ])('reads %s as a count of %i', (address, count) => {
+        const addr = parseAddress(address);
+        expect(addr.arrayLength).toBe(count);
+        expect(addr.bitOffset).toBe(0);
+      });
+
+      it('sends a count to nodes7 in its own form', () => {
+        expect(toNodes7Address(parseAddress('DB1,BYTE10.4'))).toBe('DB1,BYTE10.4');
+        expect(toNodes7Address(parseAddress('DB1,REAL0.0.3'))).toBe('DB1,REAL0.3');
+      });
+
+      it('reads a BOOL as a bit, then a count of bits', () => {
+        expect(parseAddress('DB1,BOOL10.3')).toMatchObject({ bitOffset: 3, arrayLength: undefined });
+        expect(parseAddress('DB1,BOOL10.3.8')).toMatchObject({ bitOffset: 3, arrayLength: 8 });
+      });
+
+      it('refuses a bit offset on a type that has no bits', () => {
+        expect(() => parseAddress('DB1,REAL0.3.2')).toThrow('Only a BOOL takes a bit offset; for 2 values write .2');
+      });
+
+      it('refuses a BOOL bit outside 0-7 and a count of 0', () => {
+        expect(() => parseAddress('DB1,BOOL10.12')).toThrow('Bit offset must be 0-7 for BOOL');
+        expect(() => parseAddress('DB1,BYTE10.0')).toThrow('Count must be at least 1');
+      });
+
+      it('leaves a STRING suffix to the string rules', () => {
+        // A STRING's suffix is its length (#44), never a bit offset or a count of strings here
+        expect(parseAddress('DB1,STRING50.5').bitOffset).toBe(0);
+        expect(parseAddress('DB1,STRING50.20').bitOffset).toBe(0);
+      });
+    });
+
     it('is case-insensitive', () => {
       const addr = parseAddress('db1,real0');
       expect(addr.area).toBe('DB');
@@ -115,6 +150,24 @@ describe('address-parser', () => {
       const addr = parseAddress('DB3.DBD4');
       expect(addr.dataType).toBe('DWORD');
       expect(addr.offset).toBe(4);
+    });
+  });
+
+  describe('parseAddress - suffix on area and IEC addresses', () => {
+    it('reads a sized area address with one number as a count, like nodes7', () => {
+      expect(parseAddress('QB0.4')).toMatchObject({ dataType: 'BYTE', bitOffset: 0, arrayLength: 4 });
+      expect(parseAddress('MW0.0.3')).toMatchObject({ dataType: 'WORD', bitOffset: 0, arrayLength: 3 });
+      expect(toNodes7Address(parseAddress('QB0.4'))).toBe('QB0.4');
+    });
+
+    it('keeps an area address with no size letter as a bit', () => {
+      expect(parseAddress('Q0.1')).toMatchObject({ dataType: 'BOOL', bitOffset: 1 });
+      expect(parseAddress('M10.3.8')).toMatchObject({ dataType: 'BOOL', bitOffset: 3, arrayLength: 8 });
+    });
+
+    it('refuses a bit offset on a byte or word', () => {
+      expect(() => parseAddress('MW0.3.2')).toThrow('Only a BOOL takes a bit offset');
+      expect(() => parseAddress('DB1.DBB10.3')).toThrow('Only DBX takes a bit offset');
     });
   });
 
