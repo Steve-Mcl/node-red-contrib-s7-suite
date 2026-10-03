@@ -188,6 +188,18 @@
     };
   };
 
+  // Validator for a str/env TSAP TypedInput: empty (TSAPs are optional), hex with or without 0x
+  // (0x0100, 0100), or the dotted form LOGO! Soft Comfort shows (01.00). Mirrors parseTsap()
+  // in s7-config.ts.
+  window.s7SuiteTsapField = function (typeField) {
+    return function (v) {
+      var type = $('#node-config-input-' + typeField).val() || this[typeField] || 'str';
+      var text = String(v === undefined || v === null ? '' : v).trim();
+      if (type === 'env') return text !== '';
+      return text === '' || /^(0x)?[0-9a-f]{1,4}$/i.test(text) || /^[0-9a-f]{1,2}\.[0-9a-f]{1,2}$/i.test(text);
+    };
+  };
+
   // ===== Config node registration =====
   RED.nodes.registerType('s7-config', {
     category: 'config',
@@ -203,9 +215,9 @@
       slotType: { value: 'num' },
       plcType: { value: 'S7-1200' },
       backend: { value: 'nodes7' },
-      localTSAP: { value: '' },
+      localTSAP: { value: '', validate: s7SuiteTsapField('localTSAPType') },
       localTSAPType: { value: 'str' },
-      remoteTSAP: { value: '' },
+      remoteTSAP: { value: '', validate: s7SuiteTsapField('remoteTSAPType') },
       remoteTSAPType: { value: 'str' },
       connectionTimeout: { value: 5000, validate: s7SuiteNumberField('connectionTimeoutType', 1, Number.MAX_SAFE_INTEGER) },
       connectionTimeoutType: { value: 'num' },
@@ -411,6 +423,8 @@
     <dd>TCP port (default: 102)</dd>
     <dt>Rack / Slot <span class="property-type">number | env</span></dt>
     <dd>PLC rack and slot numbers. Choosing a PLC type fills in its usual slot, unless the slot is set from an environment variable.</dd>
+    <dt class="optional">Local / Remote TSAP <span class="property-type">string | env</span></dt>
+    <dd>Connect by TSAP instead of rack and slot, as LOGO! and S7-200 need (e.g. LOGO! local <code>0x0100</code>, remote <code>0x0200</code>). TSAPs are hex: <code>0x0100</code>, <code>0100</code> and <code>01.00</code> (the form LOGO! Soft Comfort shows) all mean the same. A decimal number is read as hex too, so <code>256</code> means 0x0256, not 0x0100.</dd>
     <dt>Environment variables</dt>
     <dd>Host, port, rack, slot, the TSAPs, timeouts and reconnect intervals can each be set directly or, by switching the field to <b>env</b>, from the named environment variable (Node-RED's global or flow environment variables, or the process environment). An unset variable, or a non-numeric one for a numeric field, stops the connection and is reported as a config error rather than falling back to a default.</dd>
     <dt>PLC Type <span class="property-type">select</span></dt>

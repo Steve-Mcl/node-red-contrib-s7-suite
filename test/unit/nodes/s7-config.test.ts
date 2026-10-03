@@ -274,6 +274,47 @@ describe('s7-config node', () => {
         }
       });
 
+      describe('TSAP parsing', () => {
+        it.each([
+          ['0x0100', 0x0100], ['0100', 0x0100], ['100', 0x0100], ['01.00', 0x0100],
+          ['02.00', 0x0200], ['1000', 0x1000], ['0X4D57', 0x4d57], ['4d.57', 0x4d57],
+        ])('reads %s as 0x%s', (text, expected) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const node: any = makeNode();
+          constructorFn.call(node, { ...base, port: 102, rack: 0, slot: 2, localTSAP: text, remoteTSAP: '0200' });
+
+          expect(node.s7Config.localTSAP).toBe(expected);
+          expect(node.error).not.toHaveBeenCalled();
+          node.emit('close', () => undefined);
+        });
+
+        it.each(['01.00.00', 'xyz', '0x12345', '1.2.3', '256.1'])('reports "%s" as not a TSAP', (text) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const node: any = makeNode();
+          constructorFn.call(node, { ...base, port: 102, rack: 0, slot: 2, localTSAP: text, remoteTSAP: '0200' });
+
+          expect(node.error).toHaveBeenCalledWith(
+            `Invalid S7 config: localTSAP: "${text}" is not a TSAP (expected hex such as 0x0100, 0100 or 01.00)`,
+          );
+        });
+
+        it('parses a dotted TSAP from an environment variable', () => {
+          process.env.S7_TEST_RTSAP = '02.00';
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const node: any = makeNode();
+            constructorFn.call(node, {
+              ...base, port: 102, rack: 0, slot: 2, localTSAP: '0100', remoteTSAP: 'S7_TEST_RTSAP', remoteTSAPType: 'env',
+            });
+
+            expect(node.s7Config.remoteTSAP).toBe(0x0200);
+            node.emit('close', () => undefined);
+          } finally {
+            delete process.env.S7_TEST_RTSAP;
+          }
+        });
+      });
+
       it('treats fields without a type as numbers, as before', () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const node: any = makeNode();
