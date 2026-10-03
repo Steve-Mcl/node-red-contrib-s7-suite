@@ -2,7 +2,7 @@ import { S7Address, S7AreaType, S7DataType } from '../types';
 import { S7Error, S7ErrorCode } from '../utils/error-codes';
 
 const NODES7_REGEX =
-  /^(DB)(\d+),(BOOL|BYTE|WORD|DWORD|INT|DINT|REAL|LREAL|CHAR|STRING|USINT|UINT|UDINT|LINT|ULINT|DATE|TIME|TIME_OF_DAY|DATE_AND_TIME|S5TIME|WSTRING)(\d+)(?:\.(\d))?(?:\.(\d+))?$/i;
+  /^(DB)(\d+),(BOOL|X|BYTE|WORD|DWORD|INT|DINT|REAL|LREAL|CHAR|STRING|USINT|UINT|UDINT|LINT|ULINT|DATE|TIME|TIME_OF_DAY|DATE_AND_TIME|S5TIME|WSTRING)(\d+)(?:\.(\d))?(?:\.(\d+))?$/i;
 
 const IEC_REGEX =
   /^(DB)(\d+)\.(DBX|DBB|DBW|DBD)(\d+)(?:\.(\d))?$/i;
@@ -119,7 +119,9 @@ function tryParseNodes7Style(input: string): S7Address | null {
   if (!match) return null;
 
   const dbNumber = parseInt(match[2], 10);
-  const dataType = match[3].toUpperCase() as S7DataType;
+  const typeToken = match[3].toUpperCase();
+  // X is nodes7's own name for a bit (DB1,X0.0)
+  const dataType = (typeToken === 'X' ? 'BOOL' : typeToken) as S7DataType;
   const offset = parseInt(match[4], 10);
   const bitOffset = match[5] !== undefined ? parseInt(match[5], 10) : 0;
   const arrayLength = match[6] !== undefined ? parseInt(match[6], 10) : undefined;
@@ -195,7 +197,9 @@ function tryParseAreaStyle(input: string): S7Address | null {
 /** Converts a structured S7Address object back into a nodes7-compatible address string. */
 export function toNodes7Address(addr: S7Address): string {
   if (addr.area === 'DB') {
-    let result = `DB${addr.dbNumber},${addr.dataType}${addr.offset}`;
+    // nodes7 only recognises X for a DB bit; it ignores an item typed BOOL
+    const typeToken = addr.dataType === 'BOOL' ? 'X' : addr.dataType;
+    let result = `DB${addr.dbNumber},${typeToken}${addr.offset}`;
     if (addr.dataType === 'BOOL') {
       result += `.${addr.bitOffset}`;
     }
