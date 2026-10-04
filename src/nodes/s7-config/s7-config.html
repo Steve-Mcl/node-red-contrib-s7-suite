@@ -229,16 +229,18 @@
     }
   };
 
-  // Validator for a num/env TypedInput: a whole number in [min, max], or an environment
-  // variable name. RED.validators.typedInput('...Type') alone accepts any number, negatives
-  // and fractions included. Returns a boolean: Node-RED 2.x treats a returned string as valid.
-  window.s7SuiteNumberField = function (typeField, min, max) {
+  // Validator for a num/env TypedInput: a whole number in [min, max] (any number in range with
+  // allowFraction), or an environment variable name. RED.validators.typedInput('...Type') alone
+  // accepts any number, negatives and fractions included. Returns a boolean: Node-RED 2.x treats
+  // a returned string as valid. Used by config nodes (node-config-input-) and flow nodes (node-input-).
+  window.s7SuiteNumberField = function (typeField, min, max, allowFraction) {
     return function (v) {
-      var type = $('#node-config-input-' + typeField).val() || this[typeField] || 'num';
+      var type = $('#node-config-input-' + typeField).val() || $('#node-input-' + typeField).val() ||
+        this[typeField] || 'num';
       var text = String(v === undefined || v === null ? '' : v).trim();
       if (type === 'env') return text !== '';
       var n = Number(text);
-      return text !== '' && Number.isInteger(n) && n >= min && n <= max;
+      return text !== '' && Number.isFinite(n) && (allowFraction || Number.isInteger(n)) && n >= min && n <= max;
     };
   };
 

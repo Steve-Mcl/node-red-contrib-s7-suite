@@ -101,6 +101,8 @@ The `sim` backend supports every type. Counters and timers (`C1`, `T2`) also nee
 
 Host, port, rack, slot, the TSAPs, the timeouts and the reconnect intervals on `s7-config` each take either a value or the name of an environment variable (pick `env` in the field's type menu). Node-RED's flow and global environment variables work as well as the process environment, so the same flow can be deployed against different PLCs. A variable that is unset, or not a number where one is needed, is reported as a config error and the node does not connect — it never falls back to a default.
 
+`s7-trigger`'s **Interval** and **Deadband** work the same way. An unset or unusable variable stops that trigger with an error.
+
 ### Node API
 
 #### s7-read
@@ -136,16 +138,16 @@ On success, the input message is passed through to the output.
 
 #### s7-trigger
 
-| Property | Type | Description |
+The node has no input: it starts polling once the PLC is connected, and is configured in the editor.
+
+| Setting / property | Type | Description |
 |----------|------|-------------|
-| `msg.interval` | number | Input: override polling interval (ms) — see note below |
-| `msg.edgeMode` | string | Input: override edge mode (`any`, `rising`, `falling`) |
-| `msg.deadband` | number | Input: override deadband threshold |
+| Interval | `num` / `env` | Polling interval in ms, a whole number of 1 or more (default 1000) |
+| Edge mode | select | `any`, `rising` or `falling` (rising and falling apply to booleans) |
+| Deadband | `num` / `env` | Minimum change in a numeric value that triggers a message, 0 or more (default 0) |
 | `msg.payload` | any | Output: new value |
 | `msg.topic` | string | Output: address that changed |
 | `msg.oldValue` | any | Output: previous value |
-
-> **Note:** the three input properties are not usable yet: the node currently has no input port ([#29](https://github.com/blanpa/node-red-contrib-s7-suite/issues/29)).
 
 #### s7-browse
 

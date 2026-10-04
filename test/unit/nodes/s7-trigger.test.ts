@@ -19,6 +19,10 @@ describe('s7-trigger node', () => {
       }),
       getNode: jest.fn(),
     },
+    util: {
+      // Node-RED resolves 'env' from flow/global env vars, then the process environment
+      evaluateNodeProperty: jest.fn((value: string, type: string) => (type === 'env' ? process.env[value] : value)),
+    },
   };
 
   function createServerNode() {
@@ -374,95 +378,79 @@ describe('s7-trigger node', () => {
       );
     });
 
-    describe('input handler for runtime config', () => {
-      it('updates interval via msg.interval', () => {
-        const node = createNodeContext();
-        constructorFn.call(node, {
-          id: 'trigger1',
-          type: 's7-trigger',
-          server: 'config1',
-          address: 'DB1,REAL0',
-          interval: 1000,
-          edgeMode: 'any',
-          deadband: 0,
-        });
-
-        const done = jest.fn();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const inputHandler = (node as any).listeners('input')[0];
-        inputHandler({ interval: 2000 }, jest.fn(), done);
-
-        expect(done).toHaveBeenCalledWith();
-        expect(node.status).toHaveBeenCalledWith({
-          fill: 'green', shape: 'dot', text: 'polling 2000ms',
-        });
-      });
-
-      it('updates edgeMode via msg.edgeMode', () => {
-        const node = createNodeContext();
-        constructorFn.call(node, {
-          id: 'trigger1',
-          type: 's7-trigger',
-          server: 'config1',
-          address: 'DB1,REAL0',
-          interval: 1000,
-          edgeMode: 'any',
-          deadband: 0,
-        });
-
-        const done = jest.fn();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const inputHandler = (node as any).listeners('input')[0];
-        inputHandler({ edgeMode: 'rising' }, jest.fn(), done);
-
-        expect(done).toHaveBeenCalledWith();
-      });
-
-      it('updates deadband via msg.deadband', () => {
-        const node = createNodeContext();
-        constructorFn.call(node, {
-          id: 'trigger1',
-          type: 's7-trigger',
-          server: 'config1',
-          address: 'DB1,REAL0',
-          interval: 1000,
-          edgeMode: 'any',
-          deadband: 0,
-        });
-
-        const done = jest.fn();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const inputHandler = (node as any).listeners('input')[0];
-        inputHandler({ deadband: 5 }, jest.fn(), done);
-
-        expect(done).toHaveBeenCalledWith();
-      });
-
-      it('ignores invalid msg properties', () => {
-        const node = createNodeContext();
-        constructorFn.call(node, {
-          id: 'trigger1',
-          type: 's7-trigger',
-          server: 'config1',
-          address: 'DB1,REAL0',
-          interval: 1000,
-          edgeMode: 'any',
-          deadband: 0,
-        });
-
-        node.status.mockClear();
-
-        const done = jest.fn();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const inputHandler = (node as any).listeners('input')[0];
-        inputHandler({ interval: -1, edgeMode: 'invalid', deadband: -5 }, jest.fn(), done);
-
-        expect(done).toHaveBeenCalledWith();
-        // Status should not have been updated since all values are invalid
-        expect(node.status).not.toHaveBeenCalled();
-      });
+    it('has no input handler: the node has no input port', () => {
+      const node = createNodeContext();
+      constructorFn.call(node, { id: 'trigger1', type: 's7-trigger', server: 'config1', address: 'DB1,REAL0', interval: 1000, edgeMode: 'any', deadband: 0 });
+      expect(node.listeners('input')).toHaveLength(0);
     });
 
+    describe('interval and deadband from environment variables', () => {
+      const base = { id: 'trigger1', type: 's7-trigger', server: 'config1', address: 'DB1,REAL0', edgeMode: 'any' };
+
+      beforeEach(() => {
+        process.env.S7_TRIG_INTERVAL = '2500';
+        process.env.S7_TRIG_DEADBAND = '0.5';
+        process.env.S7_TRIG_BAD = 'fast';
+        process.env.S7_TRIG_FRACTION = '250.5';
+        process.env.S7_TRIG_NEGATIVE = '-1';
+        delete process.env.S7_TRIG_MISSING;
+      });
+
+      afterEach(() => {
+        for (const name of ['S7_TRIG_INTERVAL', 'S7_TRIG_DEADBAND', 'S7_TRIG_BAD', 'S7_TRIG_FRACTION', 'S7_TRIG_NEGATIVE']) {
+          delete process.env[name];
+        }
+      });
+
+      it('reads env-typed fields from the environment', () => {
+        const node = createNodeContext();
+        constructorFn.call(node, {
+          ...base, interval: 'S7_TRIG_INTERVAL', intervalType: 'env', deadband: 'S7_TRIG_DEADBAND', deadbandType: 'env',
+        });
+        expect(node.error).not.toHaveBeenCalled();
+        expect(node.status).toHaveBeenCalledWith(expect.objectContaining({ text: 'polling 2500ms' }));
+        node.emit('close', jest.fn());
+      });
+
+      it('keeps num-typed fields as before', () => {
+        const node = createNodeContext();
+        constructorFn.call(node, { ...base, interval: '750', intervalType: 'num', deadband: '0', deadbandType: 'num' });
+        expect(node.status).toHaveBeenCalledWith(expect.objectContaining({ text: 'polling 750ms' }));
+        node.emit('close', jest.fn());
+      });
+
+      it('stops with an error when a variable is not set, instead of using a default', () => {
+        const node = createNodeContext();
+        constructorFn.call(node, { ...base, interval: 'S7_TRIG_MISSING', intervalType: 'env', deadband: 0 });
+        expect(node.error).toHaveBeenCalledWith(
+          'Invalid setting: interval: environment variable "S7_TRIG_MISSING" is not set',
+        );
+        expect(node.status).toHaveBeenLastCalledWith({ fill: 'red', shape: 'ring', text: 'invalid setting' });
+        expect(serverNode.deregisterChildNode).toHaveBeenCalledWith(node);
+      });
+
+      it('stops with an error when a variable is not a usable number', () => {
+        for (const [interval, deadband, message] of [
+          ['S7_TRIG_BAD', '0', 'interval: environment variable "S7_TRIG_BAD" is "fast", not a whole number of ms, 1 or more'],
+          ['S7_TRIG_FRACTION', '0', 'interval: environment variable "S7_TRIG_FRACTION" is "250.5", not a whole number of ms, 1 or more'],
+          ['S7_TRIG_INTERVAL', 'S7_TRIG_NEGATIVE', 'deadband: environment variable "S7_TRIG_NEGATIVE" is "-1", not a number, 0 or more'],
+        ]) {
+          const node = createNodeContext();
+          constructorFn.call(node, {
+            ...base, interval, intervalType: 'env', deadband, deadbandType: deadband === '0' ? 'num' : 'env',
+          });
+          expect(node.error).toHaveBeenCalledWith(`Invalid setting: ${message}`);
+        }
+      });
+
+      it('reports both settings when both are wrong', () => {
+        const node = createNodeContext();
+        constructorFn.call(node, {
+          ...base, interval: 'S7_TRIG_MISSING', intervalType: 'env', deadband: 'S7_TRIG_BAD', deadbandType: 'env',
+        });
+        expect(node.error.mock.calls[0][0]).toMatch(/^Invalid setting: interval: .*; deadband: /);
+      });
+    });
     it('reports errors from poller to node.error', async () => {
       jest.useRealTimers();
 
