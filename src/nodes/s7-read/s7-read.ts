@@ -179,6 +179,19 @@ export = function (RED: NodeAPI): void {
 
         const results: S7ReadResult[] = await serverNode.connectionManager.read(items);
 
+        // A backend marks an address it couldn't read as bad instead of failing the whole read.
+        // Fail when nothing could be read; otherwise send what was read and warn about the rest.
+        const failed = results
+          .map((r, i) => (r.quality === 'bad' ? `${addresses[i]} (${r.error ?? 'no value'})` : undefined))
+          .filter((f): f is string => f !== undefined);
+        if (results.length > 0 && failed.length === results.length) {
+          done(new Error(`Read failed: ${failed.join(', ')}`));
+          return;
+        }
+        if (failed.length > 0) {
+          this.warn(`Read failed, sent as null: ${failed.join(', ')}`);
+        }
+
         if (outputMode === 'object' || addresses.length > 1) {
           let labelMap: Record<string, string> = {};
           try {

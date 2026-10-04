@@ -68,6 +68,8 @@ S7-200, S7-300, S7-400, S7-1200, S7-1500, LOGO!
 - **struct** — `msg.payload` = `{ fieldName: value, ... }` based on schema definition
 - **bits** — `msg.payload` = `boolean[]` with each bit unpacked (LSB first per byte)
 
+If some addresses in a read fail, the rest are still sent and the failed ones are `null`, with a warning naming them. If they all fail, the node reports an error. Both backends behave the same way.
+
 #### s7-write
 
 | Property | Type | Description |

@@ -249,6 +249,36 @@ describe('s7-read node', () => {
       expect(send).not.toHaveBeenCalled();
     });
 
+    describe('when the backend marks addresses bad', () => {
+      const result = (name: string, value: unknown, bad = false): Record<string, unknown> => ({
+        name, address: {}, value, quality: bad ? 'bad' : 'good', timestamp: 0, error: bad ? 'BAD 255' : undefined,
+      });
+
+      async function run(address: string, results: Record<string, unknown>[]) {
+        mockBackend.read = jest.fn(async () => results) as unknown as MockBackend['read'];
+        const node = Object.assign(createNodeContext(), { warn: jest.fn() });
+        constructorFn.call(node, { id: 'read1', type: 's7-read', server: 'config1', address, outputMode: 'object', topic: '' });
+        const send = jest.fn();
+        const done = jest.fn();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (node as any).listeners('input')[0]({ _msgid: '1', payload: null }, send, done);
+        return { node, send, done };
+      }
+
+      it('sends what was read and warns about the rest', async () => {
+        const { node, send, done } = await run('DB1,INT0 DB1,REAL200', [result('item_0', 11), result('item_1', null, true)]);
+        expect(send).toHaveBeenCalledWith(expect.objectContaining({ payload: { 'DB1,INT0': 11, 'DB1,REAL200': null } }));
+        expect(node.warn).toHaveBeenCalledWith('Read failed, sent as null: DB1,REAL200 (BAD 255)');
+        expect(done).toHaveBeenCalledWith();
+      });
+
+      it('fails without sending when nothing could be read', async () => {
+        const { send, done } = await run('DB1,REAL200', [result('item_0', null, true)]);
+        expect(send).not.toHaveBeenCalled();
+        expect(done.mock.calls[0][0].message).toBe('Read failed: DB1,REAL200 (BAD 255)');
+      });
+    });
+
     it('calls done with error when read fails', async () => {
       mockBackend.shouldFailRead = true;
 
