@@ -36,6 +36,9 @@ interface S7ConfigNodeDef extends NodeDef {
   reconnectIntervalType?: 'num' | 'env';
   maxReconnectIntervalType?: 'num' | 'env';
   int64As?: Int64Mode;
+  // Absent on config nodes saved before these settings existed: auto connect on, dynamic off
+  autoConnect?: boolean;
+  allowDynamic?: boolean;
 }
 
 type StringField = 'host' | 'localTSAP' | 'remoteTSAP';
@@ -103,6 +106,9 @@ export = function (RED: NodeAPI): void {
       return value;
     };
 
+    this.autoConnect = config.autoConnect !== false;
+    this.allowDynamic = config.allowDynamic === true;
+
     const slot = config.slotType !== 'env'
       && (config.slot === undefined || config.slot === null || (config.slot as unknown) === '')
       ? PLC_DEFAULT_SLOTS[plcType]
@@ -124,9 +130,12 @@ export = function (RED: NodeAPI): void {
       maxReconnectInterval: numField('maxReconnectInterval', 30000),
       debug: config.debug === true,
       int64As: config.int64As === 'bigint' || config.int64As === 'string' ? config.int64As : 'number',
+      // Without auto connect, a failed connect or a lost link waits for the next connect action
+      autoReconnect: this.autoConnect,
     };
 
     const validationError = fieldErrors.length > 0 ? fieldErrors.join('; ') : validateConfig(this.s7Config);
+    this.configError = validationError;
     if (validationError) {
       this.error(`Invalid S7 config: ${validationError}`);
     }
@@ -143,7 +152,23 @@ export = function (RED: NodeAPI): void {
       }
     });
 
-    if (!validationError) {
+    this.getStatus = () => ({
+      id: this.id,
+      name: this.name || null,
+      ...this.connectionManager.getStatus(),
+      backend: this.s7Config.backend,
+      host: this.s7Config.host,
+      port: this.s7Config.port,
+      rack: this.s7Config.rack,
+      slot: this.s7Config.slot,
+      plcType: this.s7Config.plcType,
+      autoConnect: this.autoConnect,
+      allowDynamic: this.allowDynamic,
+      configError: this.configError,
+    });
+
+    // Without auto connect the connection stays down until a flow sends msg.action "connect"
+    if (!validationError && this.autoConnect) {
       this.connectionManager.connect().catch((err: Error) => {
         this.error(`Failed to connect to ${this.s7Config.host}:${this.s7Config.port}: ${err.message}`);
       });
@@ -227,7 +252,8 @@ export = function (RED: NodeAPI): void {
       res.json({ state: 'unknown' });
       return;
     }
-    res.json({ state: configNode.connectionManager.getState() });
+    // The same report msg.action "status" sends, so the two can't drift apart
+    res.json(configNode.getStatus());
   });
 
   // Browse endpoint: returns address list from connected PLC

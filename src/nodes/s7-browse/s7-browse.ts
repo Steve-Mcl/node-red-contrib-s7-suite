@@ -7,6 +7,7 @@ import { S7DataType } from '../../types/s7-address';
 import { readValue } from '../../core/data-converter';
 import { statusForState } from '../shared/status-helper';
 import { parseCfg, CfgParseResult } from '../../core/cfg-parser';
+import { handleConnectionAction } from '../shared/connection-action';
 
 interface S7BrowseNodeDef extends NodeDef {
   server: string;
@@ -91,6 +92,9 @@ export = function (RED: NodeAPI): void {
 
     this.on('input', async (msg: NodeMessage, _send, done) => {
       const send = _send || ((m: NodeMessage) => this.send(m));
+
+      // msg.action (with Dynamic control on) acts on the connection and does no PLC I/O
+      if (await handleConnectionAction(serverNode, msg, send, done)) return;
 
       if (browsing) {
         done(new Error('Browse already in progress'));

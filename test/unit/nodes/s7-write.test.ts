@@ -164,6 +164,20 @@ describe('s7-write node', () => {
       expect(mockBackend.writeCalls).toHaveLength(0);
     });
 
+    it('msg.action disconnects instead of writing when Dynamic control is on', async () => {
+      Object.assign(serverNode, { allowDynamic: true, configError: null, getStatus: () => connManager.getStatus() });
+      const node = createNodeContext();
+      constructorFn.call(node, { id: 'write1', type: 's7-write', server: 'config1', address: 'DB1,REAL0' });
+      const send = jest.fn();
+      const done = jest.fn();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (node as any).listeners('input')[0]({ _msgid: '1', action: 'disconnect', payload: 1.5 }, send, done);
+      expect(connManager.getState()).toBe('disconnected');
+      expect(mockBackend.writeCalls).toHaveLength(0);
+      expect(send).not.toHaveBeenCalled();
+      expect(done).toHaveBeenCalledWith();
+    });
+
     it('ignores msg.topic and msg.mode: the configured address and mode are used', async () => {
       const node = createNodeContext();
       constructorFn.call(node, { id: 'write1', type: 's7-write', server: 'config1', address: 'DB1,REAL0' });
