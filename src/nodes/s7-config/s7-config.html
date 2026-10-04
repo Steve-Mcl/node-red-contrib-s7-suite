@@ -229,6 +229,31 @@
     }
   };
 
+  // Start a new struct schema row from the one above it: the same type (and string length) at
+  // the next free offset, or the next bit for a BOOL. The name is left empty for the user to type.
+  // `field` holds the new row's { type, offset, bit, len } inputs. Rows are read by position, as
+  // the nodes' oneditsave does: inputs are name, offset, bit, length, and one select for the type.
+  window.s7SuiteSeedSchemaField = function (row, field) {
+    var previous = row.closest('li').prev('li');
+    if (!previous.length) return;
+    var inputs = previous.find('input');
+    var query = {
+      type: previous.find('select').val(),
+      offset: $(inputs[1]).val(),
+      bit: $(inputs[2]).val(),
+      length: $(inputs[3]).val()
+    };
+    if (!query.type || query.offset === '') return;
+    $.getJSON('s7-suite/next-field', query, function (next) {
+      // Leave a row the user has already started filling in
+      if (!next || next.offset === undefined || field.offset.val() !== '') return;
+      field.type.val(next.type).trigger('change');
+      field.offset.val(next.offset);
+      field.bit.val(next.bit !== undefined ? next.bit : '');
+      field.len.val(next.length !== undefined ? next.length : '');
+    });
+  };
+
   // Validator for a num/env TypedInput: a whole number in [min, max], or an environment
   // variable name. RED.validators.typedInput('...Type') alone accepts any number, negatives
   // and fractions included. Returns a boolean: Node-RED 2.x treats a returned string as valid.

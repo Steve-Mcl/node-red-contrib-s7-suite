@@ -1,4 +1,4 @@
-import { nextAddress } from '../../../src/core/next-address';
+import { nextAddress, nextSchemaField } from '../../../src/core/next-address';
 import { parseAddress } from '../../../src/core/address-parser';
 
 describe('nextAddress', () => {
@@ -76,5 +76,43 @@ describe('nextAddress', () => {
       const next = nextAddress(a) as string;
       expect(() => parseAddress(next)).not.toThrow();
     }
+  });
+});
+
+describe('nextSchemaField', () => {
+  it.each([
+    // same type at the next free offset
+    [{ type: 'REAL', offset: 0 }, { type: 'REAL', offset: 4 }],
+    [{ type: 'INT', offset: 4 }, { type: 'INT', offset: 6 }],
+    [{ type: 'LREAL', offset: 8 }, { type: 'LREAL', offset: 16 }],
+    [{ type: 'DTL', offset: 0 }, { type: 'DTL', offset: 12 }],
+    [{ type: 'BYTE', offset: 3 }, { type: 'BYTE', offset: 4 }],
+    // a string keeps its max length: STRING[10] at 2 is 12 bytes, so the next starts at 14
+    [{ type: 'STRING', offset: 2, length: 10 }, { type: 'STRING', offset: 14, length: 10 }],
+    [{ type: 'STRING', offset: 0, length: 11 }, { type: 'STRING', offset: 14, length: 11 }], // 13, rounded up
+    [{ type: 'WSTRING', offset: 0, length: 10 }, { type: 'WSTRING', offset: 24, length: 10 }],
+    [{ type: 'STRING', offset: 0 }, { type: 'STRING', offset: 256 }], // no length: STRING[254]
+    // a BOOL moves to the next bit, wrapping into the next byte
+    [{ type: 'BOOL', offset: 6, bit: 0 }, { type: 'BOOL', offset: 6, bit: 1 }],
+    [{ type: 'BOOL', offset: 6, bit: 7 }, { type: 'BOOL', offset: 7, bit: 0 }],
+    [{ type: 'BOOL', offset: 2 }, { type: 'BOOL', offset: 2, bit: 1 }],
+    // wider than a byte starts on an even byte
+    [{ type: 'INT', offset: 3 }, { type: 'INT', offset: 6 }],
+    // the editor sends what the row holds: a hidden bit or length on other types is ignored
+    [{ type: 'REAL', offset: 0, bit: 3, length: 20 }, { type: 'REAL', offset: 4 }],
+    [{ type: 'real', offset: 0 }, { type: 'REAL', offset: 4 }],
+  ])('%j is followed by %j', (previous, expected) => {
+    expect(nextSchemaField(previous)).toEqual(expected);
+  });
+
+  it('returns null without a usable type or offset', () => {
+    expect(nextSchemaField({ type: 'NOPE', offset: 0 })).toBeNull();
+    expect(nextSchemaField({ type: '', offset: 0 })).toBeNull();
+    expect(nextSchemaField({ type: 'REAL', offset: -1 })).toBeNull();
+    expect(nextSchemaField({ type: 'REAL', offset: 1.5 })).toBeNull();
+    expect(nextSchemaField({ type: 'REAL', offset: NaN })).toBeNull();
+    expect(nextSchemaField({ type: 'BOOL', offset: 0, bit: 8 })).toBeNull();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(nextSchemaField(undefined as any)).toBeNull();
   });
 });

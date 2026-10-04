@@ -549,6 +549,20 @@ describe('s7-config node', () => {
       expect(res.json).toHaveBeenLastCalledWith({ address: '' });
     });
 
+    it('/s7-suite/next-field suggests the schema field after the given one', () => {
+      const handler = httpGetHandlers['/s7-suite/next-field'];
+      const res = { json: jest.fn() };
+      // The editor sends every input as text, empty when unset
+      handler({ query: { type: 'STRING', offset: '2', bit: '', length: '10' } }, res);
+      expect(res.json).toHaveBeenLastCalledWith({ type: 'STRING', offset: 14, length: 10 });
+      handler({ query: { type: 'BOOL', offset: '6', bit: '7', length: '' } }, res);
+      expect(res.json).toHaveBeenLastCalledWith({ type: 'BOOL', offset: 7, bit: 0 });
+      handler({ query: { type: 'REAL', offset: '' } }, res);
+      expect(res.json).toHaveBeenLastCalledWith({});
+      handler({ query: { type: 'REAL', offset: 'abc' } }, res);
+      expect(res.json).toHaveBeenLastCalledWith({});
+    });
+
     it('/s7-suite/browse/:id returns 404 for missing node', async () => {
       const handler = httpGetHandlers['/s7-suite/browse/:id'];
       mockRED.nodes.getNode.mockReturnValue(null);

@@ -407,6 +407,8 @@
           // The Add button passes no data; loading a saved schema always does
           if (Object.keys(data).length === 0) {
             setTimeout(function () { nameInput.trigger('focus'); }, 0);
+            // Same type at the next offset as the field above; the name is left to the user
+            s7SuiteSeedSchemaField(row, { type: typeSelect, offset: offsetInput, bit: bitInput, len: lenInput });
           }
         }
       });
@@ -720,7 +722,9 @@
     <pre>[{"name":"temp","type":"REAL","offset":0},
  {"name":"count","type":"INT","offset":4},
  {"name":"active","type":"BOOL","offset":6,"bit":0}]</pre>
-    Returns: <code>{"temp":23.5,"count":42,"active":true}</code></dd>
+    Returns: <code>{"temp":23.5,"count":42,"active":true}</code>
+    <b>Add field</b> starts the new field from the one above it: the same type, and the same length
+    for a string, at the next free offset, or the next bit for a BOOL. Only the name is left to type.</dd>
     <dt>Bit Array</dt>
     <dd>Reads N bytes and returns an array of booleans (LSB first per byte). Address format: <code>DB1,BYTE0.0.2</code> (2 bytes = 16 bits). Useful for status words and bitmasks.</dd>
   </dl>

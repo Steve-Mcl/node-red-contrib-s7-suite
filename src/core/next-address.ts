@@ -67,6 +67,46 @@ export function nextAddress(previous: string): string | null {
   return null;
 }
 
+/** Where a struct schema field sits: its type, byte offset, and bit (BOOL) or max length (strings). */
+export interface SchemaFieldPosition {
+  type: string;
+  offset: number;
+  bit?: number;
+  length?: number;
+}
+
+/**
+ * Suggests the schema field that follows `previous`, for seeding a new row in a struct schema:
+ * the same type, and the same max length for a string, at the next free offset. A BOOL moves
+ * to the next bit, wrapping into the next byte. As in nextAddress(), anything wider than a byte,
+ * and every string, starts on an even byte.
+ *
+ * Returns null when `previous` has no usable type or offset.
+ */
+export function nextSchemaField(previous: SchemaFieldPosition): SchemaFieldPosition | null {
+  const type = String(previous?.type ?? '').toUpperCase();
+  const offset = previous?.offset;
+  if (!Number.isInteger(offset) || offset < 0) return null;
+
+  if (type === 'BOOL') {
+    const bit = previous.bit ?? 0;
+    if (!Number.isInteger(bit) || bit < 0 || bit > 7) return null;
+    const next = afterBits(offset, bit, 1);
+    return { type, offset: next.offset, bit: next.bit };
+  }
+
+  const isString = type === 'STRING' || type === 'WSTRING';
+  const length = isString && Number.isInteger(previous.length) && (previous.length as number) > 0
+    ? previous.length
+    : undefined;
+  // byteLength() has no answer for a name it doesn't know
+  const size = byteLength(type as S7Address['dataType'], length);
+  if (!Number.isFinite(size)) return null;
+  let nextOffset = offset + size;
+  if (size > 1 || isString) nextOffset += nextOffset % 2;
+  return length !== undefined ? { type, offset: nextOffset, length } : { type, offset: nextOffset };
+}
+
 /** The bit after `count` bits starting at byte `offset`, bit `bit`, wrapping into the next byte. */
 function afterBits(offset: number, bit: number, count: number): { offset: number; bit: number } {
   const total = offset * 8 + bit + count;
