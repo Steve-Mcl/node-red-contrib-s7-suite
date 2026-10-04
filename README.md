@@ -31,7 +31,7 @@ s7-suite is a TypeScript-based Node-RED package for communicating with Siemens S
 
 ## Features
 
-- **s7-config** — Connection configuration with backend selection and auto-reconnect
+- **s7-config** — Connection configuration with backend selection and auto-reconnect. Host, port, rack, slot, TSAPs and timeouts can each come from an environment variable, so one flow can run against different PLCs
 - **s7-read** — Read PLC data in multiple output modes: single value, combined object, raw buffer, struct, or bit array
 - **s7-write** — Write data to PLC memory areas with dynamic address via `msg.topic`
 - **s7-trigger** — Polling with edge detection and deadband filtering
@@ -109,7 +109,7 @@ Requires the **snap7** backend. Send a message to execute the configured action,
 
 **Connection timeout** — Verify the PLC IP is reachable (`ping <ip>`). Check that rack/slot values match your hardware. For S7-1200/1500, ensure "Permit access with PUT/GET" is enabled in the PLC settings.
 
-**LOGO connection** — LOGO PLCs require TSAP-based connections. Set PLC Type to "LOGO" and configure Local TSAP (e.g. `0x0100`) and Remote TSAP (e.g. `0x0200`).
+**LOGO connection** — LOGO PLCs require TSAP-based connections. Set PLC Type to "LOGO" and configure Local TSAP (e.g. `0x0100`) and Remote TSAP (e.g. `0x0200`). TSAPs are hex: `0x0100`, `0100` and `01.00` (as LOGO! Soft Comfort shows them) all mean the same, and a decimal number is read as hex too.
 
 **Address parse errors** — Verify address format. Examples: `DB1,REAL0`, `DB1.DBD0`, `MW4`, `I0.1`, `QB0`. See the address format table above.
 

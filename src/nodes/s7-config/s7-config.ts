@@ -23,7 +23,21 @@ interface S7ConfigNodeDef extends NodeDef {
   reconnectInterval: number;
   maxReconnectInterval: number;
   debug?: boolean;
+  // TypedInput type per field: 'num'/'str' (the default, also when absent) or 'env'
+  hostType?: 'str' | 'env';
+  localTSAPType?: 'str' | 'env';
+  remoteTSAPType?: 'str' | 'env';
+  portType?: 'num' | 'env';
+  rackType?: 'num' | 'env';
+  slotType?: 'num' | 'env';
+  connectionTimeoutType?: 'num' | 'env';
+  requestTimeoutType?: 'num' | 'env';
+  reconnectIntervalType?: 'num' | 'env';
+  maxReconnectIntervalType?: 'num' | 'env';
 }
+
+type StringField = 'host' | 'localTSAP' | 'remoteTSAP';
+type NumericField = 'port' | 'rack' | 'slot' | 'connectionTimeout' | 'requestTimeout' | 'reconnectInterval' | 'maxReconnectInterval';
 
 export = function (RED: NodeAPI): void {
   function S7ConfigNodeConstructor(this: S7ConfigNode, config: S7ConfigNodeDef): void {
@@ -48,34 +62,68 @@ export = function (RED: NodeAPI): void {
       const n = typeof v === 'number' ? v : Number(v);
       return Number.isFinite(n) ? n : fallback;
     };
-    const toOptionalHex = (v: unknown): number | undefined => {
-      if (v === undefined || v === null || v === '') return undefined;
-      const n = parseInt(String(v), 16);
-      return Number.isFinite(n) ? n : undefined;
+    // Any of these fields can come from an environment variable (TypedInput type 'env'). Unlike
+    // a typed-in value, an unset or unusable variable is reported rather than replaced by the
+    // default, so a typo can't silently connect to the wrong host, port or slot.
+    const fieldErrors: string[] = [];
+    const fromEnv = (name: StringField | NumericField): string | undefined => {
+      const varName = String(config[name] ?? '').trim();
+      const raw = varName ? RED.util.evaluateNodeProperty(varName, 'env', this, {}) : undefined;
+      if (raw === undefined || raw === null || String(raw).trim() === '') {
+        fieldErrors.push(`${name}: environment variable "${varName}" is not set`);
+        return undefined;
+      }
+      return String(raw).trim();
+    };
+    const strField = (name: StringField): string | undefined =>
+      config[`${name}Type`] === 'env' ? fromEnv(name) : config[name];
+    const numField = (name: NumericField, fallback: number): number => {
+      if (config[`${name}Type`] !== 'env') return toNum(config[name], fallback);
+      const raw = fromEnv(name);
+      if (raw === undefined) return fallback;
+      const n = Number(raw);
+      if (!Number.isFinite(n)) {
+        fieldErrors.push(`${name}: environment variable "${String(config[name]).trim()}" is "${raw}", not a number`);
+        return fallback;
+      }
+      return n;
+    };
+    // TSAPs are hex. Text that isn't a TSAP is an error, not a silently wrong number:
+    // parseInt("01.00", 16) would have given 1.
+    const tsapField = (name: 'localTSAP' | 'remoteTSAP'): number | undefined => {
+      const text = String(strField(name) ?? '').trim();
+      if (text === '') return undefined;
+      const value = parseTsap(text);
+      if (value === null) {
+        fieldErrors.push(`${name}: "${text}" is not a TSAP (expected hex such as 0x0100, 0100 or 01.00)`);
+        return undefined;
+      }
+      return value;
     };
 
-    const slot = config.slot === undefined || config.slot === null || (config.slot as unknown) === ''
+    const slot = config.slotType !== 'env'
+      && (config.slot === undefined || config.slot === null || (config.slot as unknown) === '')
       ? PLC_DEFAULT_SLOTS[plcType]
-      : toNum(config.slot, PLC_DEFAULT_SLOTS[plcType]);
+      : numField('slot', PLC_DEFAULT_SLOTS[plcType]);
 
     this.s7Config = {
-      host: config.host || '192.168.0.1',
-      port: toNum(config.port, 102),
-      rack: toNum(config.rack, 0),
+      host: strField('host') || '192.168.0.1',
+      port: numField('port', 102),
+      rack: numField('rack', 0),
       slot,
       plcType,
       backend: config.backend || 'nodes7',
-      localTSAP: toOptionalHex(config.localTSAP),
-      remoteTSAP: toOptionalHex(config.remoteTSAP),
+      localTSAP: tsapField('localTSAP'),
+      remoteTSAP: tsapField('remoteTSAP'),
       password: (this as any).credentials?.password || undefined, // eslint-disable-line @typescript-eslint/no-explicit-any
-      connectionTimeout: toNum(config.connectionTimeout, 5000),
-      requestTimeout: toNum(config.requestTimeout, 3000),
-      reconnectInterval: toNum(config.reconnectInterval, 1000),
-      maxReconnectInterval: toNum(config.maxReconnectInterval, 30000),
+      connectionTimeout: numField('connectionTimeout', 5000),
+      requestTimeout: numField('requestTimeout', 3000),
+      reconnectInterval: numField('reconnectInterval', 1000),
+      maxReconnectInterval: numField('maxReconnectInterval', 30000),
       debug: config.debug === true,
     };
 
-    const validationError = validateConfig(this.s7Config);
+    const validationError = fieldErrors.length > 0 ? fieldErrors.join('; ') : validateConfig(this.s7Config);
     if (validationError) {
       this.error(`Invalid S7 config: ${validationError}`);
     }
@@ -299,6 +347,17 @@ export = function (RED: NodeAPI): void {
   });
 };
 
+/**
+ * Parses a TSAP written in hex: "0x0100", "0100" or "100", or the dotted form LOGO! Soft
+ * Comfort and TIA Portal show ("01.00", high byte then low byte). Returns null for anything else.
+ */
+function parseTsap(text: string): number | null {
+  const dotted = /^([0-9a-f]{1,2})\.([0-9a-f]{1,2})$/i.exec(text);
+  if (dotted) return (parseInt(dotted[1], 16) << 8) | parseInt(dotted[2], 16);
+  const hex = /^(?:0x)?([0-9a-f]{1,4})$/i.exec(text);
+  return hex ? parseInt(hex[1], 16) : null;
+}
+
 function validateConfig(cfg: {
   host: string;
   port: number;
@@ -306,6 +365,10 @@ function validateConfig(cfg: {
   slot: number;
   localTSAP?: number;
   remoteTSAP?: number;
+  connectionTimeout?: number;
+  requestTimeout?: number;
+  reconnectInterval?: number;
+  maxReconnectInterval?: number;
 }): string | null {
   if (!cfg.host || typeof cfg.host !== 'string' || cfg.host.trim() === '') {
     return 'host is required';
@@ -324,6 +387,12 @@ function validateConfig(cfg: {
   }
   if (cfg.remoteTSAP !== undefined && (Number.isNaN(cfg.remoteTSAP) || cfg.remoteTSAP < 0 || cfg.remoteTSAP > 0xffff)) {
     return `invalid remoteTSAP`;
+  }
+  for (const name of ['connectionTimeout', 'requestTimeout', 'reconnectInterval', 'maxReconnectInterval'] as const) {
+    const ms = cfg[name];
+    if (ms !== undefined && (!Number.isInteger(ms) || ms < 1)) {
+      return `invalid ${name}: ${ms} (expected a whole number of ms, 1 or more)`;
+    }
   }
   return null;
 }
