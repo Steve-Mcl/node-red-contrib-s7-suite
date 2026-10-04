@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events';
 import { IS7Backend } from '../backend/s7-backend.interface';
-import { S7ConnectionConfig, ConnectionState } from '../types/s7-connection';
+import { S7ConnectionConfig, ConnectionState, ConnectionStatus } from '../types/s7-connection';
 import { S7ReadItem, S7ReadResult, S7WriteItem } from '../types/s7-address';
 import { S7Error, S7ErrorCode } from '../utils/error-codes';
 
@@ -23,6 +23,13 @@ export class ConnectionManager extends EventEmitter {
   private healthTimer: ReturnType<typeof setInterval> | null = null;
   private healthCheckInterval: number;
   private lastActivity = 0;
+  // The connect attempt in progress, from connect() or a scheduled reconnect
+  private inflight: Promise<void> | null = null;
+  // The backend clean-up after a lost link when nothing will retry
+  private cleanup: Promise<void> | null = null;
+  private stateSince = Date.now();
+  private lastError: string | null = null;
+  private lastErrorAt: number | null = null;
 
   constructor(backend: IS7Backend, config: S7ConnectionConfig, maxQueueSize = 100) {
     super();
@@ -39,22 +46,67 @@ export class ConnectionManager extends EventEmitter {
     return this.state;
   }
 
-  /** Establishes a connection to the PLC, scheduling reconnection on failure. */
+  /** Returns the connection state, when it began, and the most recent error. */
+  getStatus(): ConnectionStatus {
+    return { state: this.state, since: this.stateSince, lastError: this.lastError, lastErrorAt: this.lastErrorAt };
+  }
+
+  /**
+   * Establishes a connection to the PLC, scheduling reconnection on failure. A pending
+   * reconnect is brought forward; an attempt already in progress is waited for, not repeated.
+   */
   async connect(): Promise<void> {
-    if (this.state === 'connected' || this.state === 'connecting') return;
+    if (this.state === 'connected') return;
+    if (this.inflight) return this.inflight;
 
     this.manualDisconnect = false;
-    this.setState('connecting');
+    this.clearReconnectTimer();
+    this.inflight = this.attempt(false).finally(() => {
+      this.inflight = null;
+    });
+    return this.inflight;
+  }
 
+  /** Drops the connection and connects again straight away, with the reconnect backoff reset. */
+  async reconnect(): Promise<void> {
+    await this.disconnect();
+    // An attempt that was in flight ends as disconnected; let it finish before starting afresh
+    if (this.inflight) await this.inflight.catch(() => undefined);
+    this.reconnectDelay = this.config.reconnectInterval ?? 1000;
+    await this.connect();
+  }
+
+  /** One connect attempt. On failure it schedules the next (unless retrying is off) and rethrows. */
+  private async attempt(scheduled: boolean): Promise<void> {
+    this.setState('connecting');
+    // A lost link's clean-up must finish first, or it could drop the new connection
+    if (this.cleanup) await this.cleanup;
     try {
       await this.backend.connect(this.config);
-      this.setState('connected');
-      this.reconnectDelay = this.config.reconnectInterval ?? 1000;
     } catch (err) {
+      this.recordError(err);
+      if (this.manualDisconnect) {
+        // disconnect() was called while this attempt was in flight
+        this.setState('disconnected');
+        throw err;
+      }
       this.setState('error');
+      if (scheduled) {
+        // Exponential backoff
+        const maxDelay = this.config.maxReconnectInterval ?? 30000;
+        this.reconnectDelay = Math.min(this.reconnectDelay * 2, maxDelay);
+      }
       this.scheduleReconnect();
       throw err;
     }
+    if (this.manualDisconnect) {
+      // disconnect() was called while this attempt was in flight
+      await this.backend.disconnect();
+      this.setState('disconnected');
+      return;
+    }
+    this.setState('connected');
+    this.reconnectDelay = this.config.reconnectInterval ?? 1000;
   }
 
   /** Disconnects from the PLC, cancelling any pending reconnect and draining the queue. */
@@ -126,6 +178,7 @@ export class ConnectionManager extends EventEmitter {
       } catch (err) {
         entry.reject(err);
         if (this.isConnectionError(err)) {
+          this.recordError(err);
           this.handleConnectionLoss();
           break;
         }
@@ -138,36 +191,38 @@ export class ConnectionManager extends EventEmitter {
   }
 
   private handleConnectionLoss(): void {
-    this.setState('reconnecting');
     this.rejectPendingQueue();
+    if (this.config.autoReconnect === false) {
+      // Nothing will retry, so the link stays down until connect(). Let the backend drop its
+      // socket and any timers of its own.
+      this.setState('error');
+      this.cleanup = this.backend.disconnect().catch(() => undefined).then(() => {
+        this.cleanup = null;
+      });
+      return;
+    }
+    this.setState('reconnecting');
     this.scheduleReconnect();
   }
 
   private scheduleReconnect(): void {
-    if (this.manualDisconnect) return;
+    if (this.manualDisconnect || this.config.autoReconnect === false) return;
     this.clearReconnectTimer();
 
-    this.reconnectTimer = setTimeout(async () => {
-      if (this.manualDisconnect) return;
-      try {
-        this.setState('connecting');
-        await this.backend.connect(this.config);
-        if (this.manualDisconnect) {
-          // disconnect() was called while the reconnect attempt was in flight
-          await this.backend.disconnect();
-          this.setState('disconnected');
-          return;
-        }
-        this.setState('connected');
-        this.reconnectDelay = this.config.reconnectInterval ?? 1000;
-      } catch {
-        this.setState('error');
-        // Exponential backoff
-        const maxDelay = this.config.maxReconnectInterval ?? 30000;
-        this.reconnectDelay = Math.min(this.reconnectDelay * 2, maxDelay);
-        this.scheduleReconnect();
-      }
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.manualDisconnect || this.inflight) return;
+      this.inflight = this.attempt(true).finally(() => {
+        this.inflight = null;
+      });
+      // A failed attempt has already scheduled the next one; nobody awaits a scheduled attempt
+      this.inflight.catch(() => undefined);
     }, this.reconnectDelay);
+  }
+
+  private recordError(err: unknown): void {
+    this.lastError = err instanceof Error ? err.message : String(err);
+    this.lastErrorAt = Date.now();
   }
 
   private clearReconnectTimer(): void {
@@ -188,6 +243,7 @@ export class ConnectionManager extends EventEmitter {
   private setState(newState: ConnectionState): void {
     const oldState = this.state;
     this.state = newState;
+    if (oldState !== newState) this.stateSince = Date.now();
     if (newState === 'connected') {
       this.startHealthCheck();
     } else {
@@ -221,6 +277,7 @@ export class ConnectionManager extends EventEmitter {
 
     // Free check (no traffic), so run it every tick
     if (!this.backend.isConnected()) {
+      this.recordError(new Error('Connection lost'));
       this.handleConnectionLoss();
       return;
     }

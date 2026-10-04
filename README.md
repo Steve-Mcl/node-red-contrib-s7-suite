@@ -101,6 +101,36 @@ The `sim` backend supports every type. Counters and timers (`C1`, `T2`) also nee
 
 Host, port, rack, slot, the TSAPs, the timeouts and the reconnect intervals on `s7-config` each take either a value or the name of an environment variable (pick `env` in the field's type menu). Node-RED's flow and global environment variables work as well as the process environment, so the same flow can be deployed against different PLCs. A variable that is unset, or not a number where one is needed, is reported as a config error and the node does not connect — it never falls back to a default.
 
+### Connection control
+
+Two settings on `s7-config` let a flow manage the connection, following the pattern of Node-RED's MQTT nodes:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Auto connect | on | Connect on deploy and retry after a failure or a lost link. Off, the connection stays down until a flow sends `msg.action = "connect"`, and a failure or lost link is not retried |
+| Dynamic control | off | `s7-read`, `s7-write`, `s7-control` and `s7-browse` accept `msg.action`. Off, `msg.action` is ignored, so existing flows are unaffected |
+
+A message carrying `msg.action` acts on the connection and does **no** PLC I/O:
+
+| `msg.action` | Effect |
+|---|---|
+| `connect` | Connects. Already connected is a success; a pending retry is brought forward |
+| `disconnect` | Disconnects and stops retrying until told to connect |
+| `reconnect` | Disconnects, then connects with the retry backoff reset |
+| `status` | Sends the message on with `msg.payload` set to the connection report (below) |
+
+```json
+{
+  "id": "a1b2c3d4", "name": "Line 1 PLC",
+  "state": "connected", "since": 1791100000000,
+  "lastError": "Connection lost", "lastErrorAt": 1791099990000,
+  "backend": "snap7", "host": "192.168.0.10", "port": 102, "rack": 0, "slot": 1, "plcType": "S7-1500",
+  "autoConnect": true, "allowDynamic": true, "configError": null
+}
+```
+
+`state` is `connected`, `connecting`, `reconnecting`, `error` or `disconnected`, and `since` is when it entered that state. `lastError` is the most recent connect failure or lost link, kept after the connection recovers. The action affects the connection, so every node using that `s7-config` sees the result. A failed `connect` or `reconnect`, or an unknown action, is reported as the node's error, so a Catch node can handle it.
+
 ### Node API
 
 #### s7-read

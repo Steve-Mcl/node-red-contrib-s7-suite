@@ -282,7 +282,9 @@
       maxReconnectInterval: { value: 30000, validate: s7SuiteNumberField('maxReconnectIntervalType', 1, Number.MAX_SAFE_INTEGER) },
       maxReconnectIntervalType: { value: 'num' },
       debug: { value: false },
-      int64As: { value: 'number' }
+      int64As: { value: 'number' },
+      autoConnect: { value: true },
+      allowDynamic: { value: false }
     },
     credentials: {
       password: { type: 'password' }
@@ -313,6 +315,11 @@
           typeField: '#node-config-input-' + field + 'Type'
         });
       });
+
+      // Config nodes saved before Auto connect existed always connected; keep them that way
+      if (node.autoConnect === undefined) {
+        $('#node-config-input-autoConnect').prop('checked', true);
+      }
 
       var plcDefaults = {};
       $.getJSON('s7-suite/plc-defaults', function (data) {
@@ -461,6 +468,23 @@
     <input type="hidden" id="node-config-input-maxReconnectIntervalType">
   </div>
   <div class="form-row">
+    <label for="node-config-input-autoConnect"><i class="fa fa-link"></i> Auto connect</label>
+    <input type="checkbox" id="node-config-input-autoConnect" style="display:inline-block; width:auto; vertical-align:top;">
+  </div>
+  <div class="form-tips s7c-tip">
+    <small>Connect on deploy and retry after a failure or a lost link. Turn off to connect only when a
+    flow sends <code>msg.action</code> <code>"connect"</code> (needs Dynamic control).</small>
+  </div>
+  <div class="form-row">
+    <label for="node-config-input-allowDynamic"><i class="fa fa-random"></i> Dynamic control</label>
+    <input type="checkbox" id="node-config-input-allowDynamic" style="display:inline-block; width:auto; vertical-align:top;">
+  </div>
+  <div class="form-tips s7c-tip">
+    <small>The read, write, control and browse nodes on this connection accept <code>msg.action</code>:
+    <code>connect</code>, <code>disconnect</code>, <code>reconnect</code> or <code>status</code>. Off,
+    <code>msg.action</code> is ignored.</small>
+  </div>
+  <div class="form-row">
     <label for="node-config-input-int64As"><i class="fa fa-hashtag"></i> LINT/ULINT as</label>
     <select id="node-config-input-int64As">
       <option value="number">Number (exact up to 2^53)</option>
@@ -502,6 +526,30 @@
     to send anywhere. Writes accept any of the three.
     With the <b>nodes7</b> backend, LINT and ULINT only work in s7-read's struct mode for now: nodes7
     itself can't read or write them, so other reads and writes are refused. Use snap7 for those.</dd>
+    <dt>Auto connect <span class="property-type">boolean</span></dt>
+    <dd>On (the default), the connection opens on deploy and retries after a failure or a lost link,
+    backing off up to <b>Max Reconnect</b>. Off, it stays down until a flow sends
+    <code>msg.action</code> <code>"connect"</code>, and a failure or lost link is not retried: it waits
+    for the next <code>connect</code> or <code>reconnect</code>. Needs <b>Dynamic control</b>.</dd>
+    <dt>Dynamic control <span class="property-type">boolean</span></dt>
+    <dd>Off (the default), <code>msg.action</code> is ignored. On, the <code>s7-read</code>,
+    <code>s7-write</code>, <code>s7-control</code> and <code>s7-browse</code> nodes using this connection
+    act on <code>msg.action</code> instead of doing their usual work:
+      <ul>
+        <li><code>connect</code>: connect now. Already connected is a success. A pending retry is
+        brought forward.</li>
+        <li><code>disconnect</code>: disconnect, and don't retry until told to connect.</li>
+        <li><code>reconnect</code>: disconnect then connect, with the retry backoff reset.</li>
+        <li><code>status</code>: send the message on with <code>msg.payload</code> set to the
+        connection report: <code>state</code> (<code>connected</code>, <code>connecting</code>,
+        <code>reconnecting</code>, <code>error</code> or <code>disconnected</code>), <code>since</code>
+        (when it entered that state, ms since 1970), <code>lastError</code> and
+        <code>lastErrorAt</code>, <code>configError</code>, and the backend, host, port, rack, slot and
+        PLC type.</li>
+      </ul>
+    The action acts on the connection, so every node using this <code>s7-config</code> sees the result.
+    A failed <code>connect</code> or <code>reconnect</code> is reported as the node's error, so a
+    Catch node can handle it. Other values of <code>msg.action</code> are an error.</dd>
     <dt>Debug logging <span class="property-type">boolean</span></dt>
     <dd>When enabled, the <code>nodes7</code> backend prints raw protocol trace
     output (every read/poll cycle) to stdout. Disabled by default to avoid

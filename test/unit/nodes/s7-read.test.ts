@@ -152,6 +152,30 @@ describe('s7-read node', () => {
       expect(done).toHaveBeenCalledWith();
     });
 
+    it('msg.action acts on the connection instead of reading when Dynamic control is on', async () => {
+      Object.assign(serverNode, { allowDynamic: true, configError: null, getStatus: () => connManager.getStatus() });
+      const node = createNodeContext();
+      constructorFn.call(node, { id: 'read1', type: 's7-read', server: 'config1', address: 'DB1,REAL0', outputMode: 'single' });
+      const send = jest.fn();
+      const done = jest.fn();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (node as any).listeners('input')[0]({ _msgid: '1', action: 'status' }, send, done);
+      expect(send).toHaveBeenCalledWith({ _msgid: '1', payload: expect.objectContaining({ state: 'connected' }) });
+      expect(mockBackend.readCalls).toHaveLength(0);
+      expect(done).toHaveBeenCalledWith();
+    });
+
+    it('reads as usual when msg.action is set but Dynamic control is off', async () => {
+      mockBackend.readValues = { item_0: 7 };
+      const node = createNodeContext();
+      constructorFn.call(node, { id: 'read1', type: 's7-read', server: 'config1', address: 'DB1,REAL0', outputMode: 'single' });
+      const send = jest.fn();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (node as any).listeners('input')[0]({ _msgid: '1', action: 'disconnect' }, send, jest.fn());
+      expect(send).toHaveBeenCalledWith(expect.objectContaining({ payload: 7 }));
+      expect(connManager.getState()).toBe('connected');
+    });
+
     it('ignores msg.topic: the configured addresses are read', async () => {
       mockBackend.readValues = { item_0: 100 };
 

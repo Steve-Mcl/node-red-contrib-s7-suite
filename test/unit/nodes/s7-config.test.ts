@@ -163,6 +163,63 @@ describe('s7-config node', () => {
       expect(nodeContext.s7Config.backend).toBe('nodes7');
     });
 
+    describe('auto connect and dynamic control', () => {
+      const makeNode = () => Object.assign(new EventEmitter(), { log: jest.fn(), warn: jest.fn(), error: jest.fn(), status: jest.fn() });
+      const base = { id: 'cfgAuto', type: 's7-config', host: '192.168.1.100', port: 102, rack: 0, slot: 1, plcType: 'S7-1200', backend: 'nodes7' };
+      const lastBackend = (): MockBackend => {
+        const results = (createBackend as jest.Mock).mock.results;
+        return results[results.length - 1].value as MockBackend;
+      };
+      const tick = () => new Promise((r) => setImmediate(r));
+
+      it('connects on deploy by default, including config nodes saved before the setting existed', async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const node: any = makeNode();
+        constructorFn.call(node, base);
+        await tick();
+        expect(lastBackend().connectCalls).toHaveLength(1);
+        expect(node.autoConnect).toBe(true);
+        expect(node.allowDynamic).toBe(false);
+        expect(node.s7Config.autoReconnect).toBe(true);
+        await node.connectionManager.disconnect();
+      });
+
+      it('stays disconnected with auto connect off, and turns off retrying', async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const node: any = makeNode();
+        constructorFn.call(node, { ...base, autoConnect: false, allowDynamic: true });
+        await tick();
+        expect(lastBackend().connectCalls).toHaveLength(0);
+        expect(node.connectionManager.getState()).toBe('disconnected');
+        expect(node.s7Config.autoReconnect).toBe(false);
+        expect(node.allowDynamic).toBe(true);
+      });
+
+      it('reports the connection state and settings', async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const node: any = makeNode();
+        node.id = 'cfgAuto';
+        node.name = 'Line 1';
+        constructorFn.call(node, base);
+        await tick();
+        expect(node.getStatus()).toEqual({
+          id: 'cfgAuto', name: 'Line 1', state: 'connected', since: expect.any(Number),
+          lastError: null, lastErrorAt: null, backend: 'nodes7', host: '192.168.1.100', port: 102,
+          rack: 0, slot: 1, plcType: 'S7-1200', autoConnect: true, allowDynamic: false, configError: null,
+        });
+        await node.connectionManager.disconnect();
+      });
+
+      it('keeps the config error for the report', () => {
+        delete process.env.S7_TEST_MISSING;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const node: any = makeNode();
+        constructorFn.call(node, { ...base, host: 'S7_TEST_MISSING', hostType: 'env', autoConnect: false });
+        expect(node.configError).toMatch(/S7_TEST_MISSING/);
+        expect(node.getStatus().configError).toBe(node.configError);
+      });
+    });
+
     describe('numeric fields from environment variables', () => {
       const makeNode = () => Object.assign(new EventEmitter(), { log: jest.fn(), warn: jest.fn(), error: jest.fn(), status: jest.fn() });
       const base = { id: 'cfgEnv', type: 's7-config', name: 'env', host: '192.168.1.100', plcType: 'S7-300', backend: 'nodes7' };
@@ -525,17 +582,20 @@ describe('s7-config node', () => {
       expect(res.json).toHaveBeenCalledWith({ state: 'unknown' });
     });
 
-    it('/s7-suite/connection-state/:id returns state for valid node', () => {
+    it('/s7-suite/connection-state/:id returns the connection report for a valid node', () => {
       const handler = httpGetHandlers['/s7-suite/connection-state/:id'];
-      const mockBackend = new MockBackend();
-      const connMgr = new ConnectionManager(mockBackend, {
-        host: '192.168.1.100', port: 102, rack: 0, slot: 1,
-        plcType: 'S7-1200' as const, backend: 'nodes7' as const,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const configNode: any = Object.assign(new EventEmitter(), { log: jest.fn(), warn: jest.fn(), error: jest.fn() });
+      constructorFn.call(configNode, {
+        id: 'config1', type: 's7-config', host: '192.168.1.100', port: 102, rack: 0, slot: 1,
+        plcType: 'S7-1200', backend: 'nodes7', autoConnect: false,
       });
-      mockRED.nodes.getNode.mockReturnValue({ connectionManager: connMgr });
+      mockRED.nodes.getNode.mockReturnValue(configNode);
       const res = { json: jest.fn() };
       handler({ params: { id: 'config1' } }, res);
-      expect(res.json).toHaveBeenCalledWith({ state: 'disconnected' });
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        state: 'disconnected', host: '192.168.1.100', port: 102, autoConnect: false, allowDynamic: false,
+      }));
     });
 
     it('/s7-suite/browse/:id returns 404 for missing node', async () => {

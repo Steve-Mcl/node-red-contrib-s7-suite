@@ -37,6 +37,22 @@ export interface S7ConnectionConfig {
   debug?: boolean;
   /** How LINT and ULINT values are returned. Defaults to 'number'. */
   int64As?: Int64Mode;
+  /**
+   * When false, a failed connect or a lost link is not retried: the connection stays down until
+   * connect() is called again. Defaults to true.
+   */
+  autoReconnect?: boolean;
+}
+
+/** The connection's state and its most recent error, for msg.action "status". */
+export interface ConnectionStatus {
+  state: ConnectionState;
+  /** When the connection entered its current state (ms since 1970). */
+  since: number;
+  /** The most recent connect failure or lost link, kept after the connection recovers. */
+  lastError: string | null;
+  /** When lastError happened (ms since 1970). */
+  lastErrorAt: number | null;
 }
 
 export const PLC_DEFAULT_SLOTS: Record<PlcType, number> = {

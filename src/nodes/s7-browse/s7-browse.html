@@ -209,6 +209,11 @@
     <dd>Any message triggers the browse / emit operation</dd>
     <dt class="optional">cfgContent <span class="property-type">string</span></dt>
     <dd><b>CFG source only:</b> raw contents of a STEP 7 .cfg file to parse at runtime (overrides the preloaded file)</dd>
+    <dt class="optional">action <span class="property-type">string</span></dt>
+    <dd>With <b>Dynamic control</b> on in the <code>s7-config</code>: <code>connect</code>, <code>disconnect</code>,
+    <code>reconnect</code> or <code>status</code>. The message then acts on the connection instead of browsing (live source);
+    <code>status</code> sends the connection report as <code>msg.payload</code>. See the <code>s7-config</code> help.
+    Ignored while Dynamic control is off.</dd>
   </dl>
   <h3>Outputs (live source)</h3>
   <dl class="message-properties">

@@ -5,6 +5,7 @@ import { S7ReadItem, S7ReadResult, S7StructField, AREA_CODE_MAP } from '../../ty
 import { readValue, byteLength } from '../../core/data-converter';
 import { createStatusUpdater } from '../shared/status-helper';
 import { AddressEntry, evaluateProperty, toAddressEntries } from '../shared/msg-source';
+import { handleConnectionAction } from '../shared/connection-action';
 
 interface S7ReadNodeDef extends NodeDef {
   server: string;
@@ -65,6 +66,9 @@ export = function (RED: NodeAPI): void {
 
     this.on('input', async (msg: NodeMessage, _send, done) => {
       const send = _send || ((m: NodeMessage) => this.send(m));
+
+      // msg.action (with Dynamic control on) acts on the connection and does no PLC I/O
+      if (await handleConnectionAction(serverNode, msg, send, done)) return;
 
       try {
         const outputMode = config.outputMode || 'single';
