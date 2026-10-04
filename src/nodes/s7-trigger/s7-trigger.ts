@@ -8,9 +8,12 @@ import { statusForState } from '../shared/status-helper';
 interface S7TriggerNodeDef extends NodeDef {
   server: string;
   address: string;
-  interval: number;
+  interval: number | string;
   edgeMode: EdgeMode;
-  deadband: number;
+  deadband: number | string;
+  // TypedInput type of interval / deadband: 'num' (the default, also when absent) or 'env'
+  intervalType?: 'num' | 'env';
+  deadbandType?: 'num' | 'env';
 }
 
 export = function (RED: NodeAPI): void {
@@ -48,12 +51,41 @@ export = function (RED: NodeAPI): void {
       return;
     }
 
-    // Editor delivers <input type="number"> values as strings - coerce them.
-    const configuredInterval = Number(config.interval) || 1000;
+    // Interval and deadband are numbers, or (type env) the name of an environment variable holding
+    // one. As on s7-config, an unset or unusable variable is an error rather than a silent default.
+    const settingErrors: string[] = [];
+    const numberSetting = (
+      field: 'interval' | 'deadband', fallback: number, isValid: (n: number) => boolean, expected: string,
+    ): number => {
+      const type = field === 'interval' ? config.intervalType : config.deadbandType;
+      // The editor delivers typed-in values as strings - coerce them, as before
+      if (type !== 'env') return Number(config[field]) || fallback;
+      const varName = String(config[field] ?? '').trim();
+      const raw = varName ? RED.util.evaluateNodeProperty(varName, 'env', this, {}) : undefined;
+      if (raw === undefined || raw === null || String(raw).trim() === '') {
+        settingErrors.push(`${field}: environment variable "${varName}" is not set`);
+        return fallback;
+      }
+      const n = Number(String(raw).trim());
+      if (!isValid(n)) {
+        settingErrors.push(`${field}: environment variable "${varName}" is "${raw}", not ${expected}`);
+        return fallback;
+      }
+      return n;
+    };
+    const interval = numberSetting('interval', 1000, (n) => Number.isInteger(n) && n >= 1, 'a whole number of ms, 1 or more');
+    const deadband = numberSetting('deadband', 0, (n) => Number.isFinite(n) && n >= 0, 'a number, 0 or more');
+    if (settingErrors.length > 0) {
+      this.status({ fill: 'red', shape: 'ring', text: 'invalid setting' });
+      this.error(`Invalid setting: ${settingErrors.join('; ')}`);
+      serverNode.deregisterChildNode(this);
+      return;
+    }
+
     const poller = new Poller({
-      interval: configuredInterval,
+      interval,
       edgeMode: config.edgeMode || 'any',
-      deadband: Number(config.deadband) || 0,
+      deadband,
     });
 
     for (const item of items) {
@@ -85,10 +117,9 @@ export = function (RED: NodeAPI): void {
       this.error(err.message);
     });
 
-    let currentInterval = configuredInterval;
     const updateStatus = ({ newState }: { newState: string }) => {
       this.status(
-        statusForState(newState, { connectedText: () => `polling ${currentInterval}ms` }),
+        statusForState(newState, { connectedText: () => `polling ${interval}ms` }),
       );
       if (newState === 'connected') {
         if (!poller.isRunning()) poller.start();
@@ -96,25 +127,6 @@ export = function (RED: NodeAPI): void {
         poller.stop();
       }
     };
-
-    this.on('input', (msg: NodeMessage, _send, done) => {
-      const m = msg as Record<string, unknown>;
-      const update: Record<string, unknown> = {};
-      if (typeof m.interval === 'number' && m.interval > 0) update.interval = m.interval;
-      if (typeof m.edgeMode === 'string' && ['any', 'rising', 'falling'].includes(m.edgeMode)) update.edgeMode = m.edgeMode;
-      if (typeof m.deadband === 'number' && m.deadband >= 0) update.deadband = m.deadband;
-
-      if (Object.keys(update).length > 0) {
-        poller.updateConfig(update as Partial<import('../../core/poller').PollerConfig>);
-        if (typeof update.interval === 'number') {
-          currentInterval = update.interval;
-          if (serverNode.connectionManager.getState() === 'connected') {
-            this.status({ fill: 'green', shape: 'dot', text: `polling ${currentInterval}ms` });
-          }
-        }
-      }
-      done();
-    });
 
     serverNode.connectionManager.on('stateChanged', updateStatus);
     updateStatus({ newState: serverNode.connectionManager.getState() });

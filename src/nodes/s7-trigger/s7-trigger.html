@@ -6,9 +6,19 @@
       name: { value: '' },
       server: { value: '', type: 's7-config', required: true },
       address: { value: '', required: true },
-      interval: { value: 1000, validate: RED.validators.number() },
+      // A number, or (type env) the name of an environment variable holding one. The validator
+      // lives in s7-config.html; look it up when called rather than when this file loads.
+      interval: {
+        value: 1000,
+        validate: function (v) { return s7SuiteNumberField('intervalType', 1, Number.MAX_SAFE_INTEGER).call(this, v); }
+      },
+      intervalType: { value: 'num' },
       edgeMode: { value: 'any' },
-      deadband: { value: 0, validate: RED.validators.number() }
+      deadband: {
+        value: 0,
+        validate: function (v) { return s7SuiteNumberField('deadbandType', 0, Number.MAX_VALUE, true).call(this, v); }
+      },
+      deadbandType: { value: 'num' }
     },
     inputs: 0,
     outputs: 1,
@@ -30,6 +40,15 @@
         addressId: '#node-input-address',
         mode: 'replace',
         refreshId: '#s7t-browse-refresh'
+      });
+      // Interval and deadband take a number or an environment variable, as s7-config's fields do.
+      // Nodes saved before this have no type and open as num.
+      ['interval', 'deadband'].forEach(function (field) {
+        $('#node-input-' + field).typedInput({
+          default: 'num',
+          types: ['num', 'env'],
+          typeField: '#node-input-' + field + 'Type'
+        });
       });
     }
   });
@@ -56,7 +75,8 @@
   </div>
   <div class="form-row">
     <label for="node-input-interval"><i class="fa fa-clock-o"></i> Interval (ms)</label>
-    <input type="number" id="node-input-interval" placeholder="1000">
+    <input type="text" id="node-input-interval" placeholder="1000" style="width:70%;">
+    <input type="hidden" id="node-input-intervalType">
   </div>
   <div class="form-row">
     <label for="node-input-edgeMode"><i class="fa fa-line-chart"></i> Edge Mode</label>
@@ -68,7 +88,8 @@
   </div>
   <div class="form-row">
     <label for="node-input-deadband"><i class="fa fa-sliders"></i> Deadband</label>
-    <input type="number" id="node-input-deadband" placeholder="0" step="0.1">
+    <input type="text" id="node-input-deadband" placeholder="0" style="width:70%;">
+    <input type="hidden" id="node-input-deadbandType">
   </div>
   <div id="s7t-browse-dialog" style="display:none;border:1px solid #ccc;border-radius:4px;padding:8px;margin-top:8px;background:#fafafa;max-height:400px;overflow:hidden;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
@@ -103,9 +124,15 @@
   <h3>Details</h3>
   <p>The node polls the configured address at the specified interval and only sends
   a message when the value changes, based on the edge mode and deadband settings.</p>
+  <p>The node has no input: it is configured here, and starts polling once the PLC is connected.</p>
   <h4>Polling Interval</h4>
-  <p>Time in milliseconds between PLC reads. Default: 1000ms. Polling starts
+  <p>Time in milliseconds between PLC reads, a whole number of 1 or more. Default: 1000ms. Polling starts
   automatically when the PLC connection is established and pauses during disconnection.</p>
+  <h4>Environment variables</h4>
+  <p><b>Interval</b> and <b>Deadband</b> each take a number or, by switching the field to <b>env</b>, the
+  name of an environment variable (Node-RED's flow or global environment variables, or the process
+  environment), so one flow can poll differently per deployment. An unset variable, or one that isn't a
+  usable number, stops the node with an error rather than falling back to a default.</p>
   <h4>Edge Mode</h4>
   <ul>
     <li><b>Any change:</b> Triggers on any value change (default)</li>
@@ -113,8 +140,8 @@
     <li><b>Falling edge:</b> Triggers only when a boolean changes from true to false</li>
   </ul>
   <h4>Deadband</h4>
-  <p>For numeric values, the minimum absolute change required to trigger a message.
-  Set to 0 to trigger on any change. Useful for filtering noise on analog signals.</p>
+  <p>For numeric values, the minimum absolute change required to trigger a message, 0 or more
+  (fractions allowed). Set to 0 to trigger on any change. Useful for filtering noise on analog signals.</p>
   <h4>Multiple Addresses</h4>
   <p>Enter multiple addresses separated by spaces or semicolons. Each address is
   monitored independently and sends separate messages when changed.</p>
