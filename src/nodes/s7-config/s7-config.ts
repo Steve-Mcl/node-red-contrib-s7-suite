@@ -8,6 +8,7 @@ import { parseAddress } from '../../core/address-parser';
 import { AREA_CODE_MAP, Int64Mode } from '../../types/s7-address';
 import { parseCfg } from '../../core/cfg-parser';
 import { parseTiaXml } from '../../core/tia-xml-parser';
+import { nextAddress } from '../../core/next-address';
 
 interface S7ConfigNodeDef extends NodeDef {
   host: string;
@@ -166,6 +167,13 @@ export = function (RED: NodeAPI): void {
 
   RED.httpAdmin.get('/s7-suite/plc-defaults', RED.auth.needsPermission('s7.read'), (_req, res) => {
     res.json(PLC_DEFAULT_SLOTS);
+  });
+
+  // The editor seeds a new address row with the address after the previous row's. The address
+  // syntax and type sizes live here, not in the editor; '' when there is no sensible guess.
+  RED.httpAdmin.get('/s7-suite/next-address', RED.auth.needsPermission('s7.read'), (req, res) => {
+    const after = typeof req.query.after === 'string' ? req.query.after : '';
+    res.json({ address: nextAddress(after) ?? '' });
   });
 
   RED.httpAdmin.post('/s7-suite/cfg-import', RED.auth.needsPermission('s7.write'), (req, res) => {

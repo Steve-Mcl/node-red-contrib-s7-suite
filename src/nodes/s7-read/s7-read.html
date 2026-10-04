@@ -45,9 +45,35 @@
           // The Add button passes no data; loading, Import and Browse always do
           if (Object.keys(data).length === 0) {
             setTimeout(function () { addrInput.trigger('focus'); }, 0);
+            seedFromPreviousRow(row, addrInput, labelInput);
           }
         }
       });
+
+      // Start a new row from the one above: DB1,REAL0 suggests DB1,REAL4, and a label ending in a
+      // number counts on (Temp1, Temp2). The guess is selected, so typing replaces it.
+      function seedFromPreviousRow(row, addrInput, labelInput) {
+        var previous = row.closest('li').prev('li');
+        var prevAddr = (previous.find('.s7r-addr').val() || '').trim();
+        if (!prevAddr) return;
+        var prevLabel = (previous.find('.s7r-label').val() || '').trim();
+        $.getJSON('s7-suite/next-address', { after: prevAddr }, function (result) {
+          // Leave a row the user has already started typing in
+          if (!result.address || addrInput.val()) return;
+          addrInput.val(result.address);
+          if (!labelInput.val()) labelInput.val(nextLabel(prevLabel));
+          if (document.activeElement === addrInput[0]) addrInput[0].select();
+        });
+      }
+
+      function nextLabel(label) {
+        var m = /^(.*?)(\d+)$/.exec(label);
+        if (!m) return '';
+        // Keep leading zeros: Temp09 is followed by Temp10, Pump007 by Pump008
+        var n = String(parseInt(m[2], 10) + 1);
+        while (n.length < m[2].length) n = '0' + n;
+        return m[1] + n;
+      }
       s7SuiteAccelerator(addrList, 'a');
 
       // Load existing addresses with labels
@@ -678,7 +704,13 @@
     <dd>Reads one address and returns the scalar value. Given more than one address, it returns an
     object as Object output does.</dd>
     <dt>Object</dt>
-    <dd>Reads one or more addresses and returns an object. Keys are the label (if set) or address. Use <b>Import CSV/Excel/CFG/XML</b> to bulk-import tag lists from a TIA Portal tag table Export (.xlsx, .xml or .sdf), Step 7 symbol exports (.csv/.tsv), or STEP 7 V5 hardware configuration exports (.cfg). The CSV importer auto-detects column names (<code>name</code>/<code>symbol</code>/<code>tag</code> and <code>address</code>) and supports tab, semicolon and comma separators. IEC-style addresses with <code>%</code> prefix are converted automatically.<br>
+    <dd>Reads one or more addresses and returns an object. Keys are the label (if set) or address.
+    <b>Add address</b> starts the new row from the one above it, with the same type and notation:
+    <code>DB1,REAL0</code> is followed by <code>DB1,REAL4</code>, <code>MW10</code> by <code>MW12</code>,
+    <code>I0.7</code> by <code>I1.0</code>, and a label ending in a number counts on. The guess is
+    selected, so typing replaces it. It follows a run of one type in a DB without optimized block
+    access; with optimized access (the S7-1200/1500 default) there are no fixed offsets to follow.
+    Use <b>Import CSV/Excel/CFG/XML</b> to bulk-import tag lists from a TIA Portal tag table Export (.xlsx, .xml or .sdf), Step 7 symbol exports (.csv/.tsv), or STEP 7 V5 hardware configuration exports (.cfg). The CSV importer auto-detects column names (<code>name</code>/<code>symbol</code>/<code>tag</code> and <code>address</code>) and supports tab, semicolon and comma separators. IEC-style addresses with <code>%</code> prefix are converted automatically.<br>
     <b>.cfg import</b> reads the full hardware config exported from SIMATIC Manager via <em>Station → Export…</em> and extracts all symbolic I/O — including modules behind Profibus/Profinet couplers that a live browse cannot discover. Digital inputs/outputs become <code>I0.3</code>/<code>Q0.3</code> addresses, analog channels become <code>IW272</code>/<code>QW272</code>.<br>
     <b>TIA Portal .xml / .sdf import</b> reads a tag table exported from TIA Portal via <em>PLC tags → &lt;table&gt; → Export</em> (Save as type Xml or Sdf). The .xml import also reads SimaticML (<code>SW.Tags.PlcTagTable</code>) as written by TIA Portal Openness; for SimaticML, multilingual comments prefer <code>de-DE</code>, then <code>en-US</code>. User constants (no address) are skipped.</dd>
     <dt>Raw Buffer</dt>

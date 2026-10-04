@@ -120,6 +120,8 @@ Any message triggers a read. The node reads the addresses and schema set in it; 
 - **struct** — `msg.payload` = `{ fieldName: value, ... }` based on schema definition
 - **bits** — `msg.payload` = `boolean[]` with each bit unpacked (LSB first per byte)
 
+In the editor, **Add address** starts a new row from the one above it, keeping the type and notation: `DB1,REAL0` is followed by `DB1,REAL4`, `DB1.DBD0` by `DB1.DBD4`, `MW10` by `MW12` and `I0.7` by `I1.0`. Arrays and strings move past their whole length, and a label ending in a number counts on (`Temp1`, `Temp2`). The guess is selected, so typing replaces it.
+
 If some addresses in a read fail, the rest are still sent and the failed ones are `null`, with a warning naming them. If they all fail, the node reports an error. Both backends behave the same way.
 
 #### s7-write

@@ -538,6 +538,17 @@ describe('s7-config node', () => {
       expect(res.json).toHaveBeenCalledWith({ state: 'disconnected' });
     });
 
+    it('/s7-suite/next-address suggests the address after the given one', () => {
+      const handler = httpGetHandlers['/s7-suite/next-address'];
+      const res = { json: jest.fn() };
+      handler({ query: { after: 'DB1,REAL0' } }, res);
+      expect(res.json).toHaveBeenLastCalledWith({ address: 'DB1,REAL4' });
+      handler({ query: { after: 'not an address' } }, res);
+      expect(res.json).toHaveBeenLastCalledWith({ address: '' });
+      handler({ query: {} }, res);
+      expect(res.json).toHaveBeenLastCalledWith({ address: '' });
+    });
+
     it('/s7-suite/browse/:id returns 404 for missing node', async () => {
       const handler = httpGetHandlers['/s7-suite/browse/:id'];
       mockRED.nodes.getNode.mockReturnValue(null);
