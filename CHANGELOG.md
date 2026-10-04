@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **`s7-read` reports addresses that couldn't be read**: when some addresses in a read fail, the rest are sent, the failed ones as `null`, and the node logs a warning naming them and the reason. When none can be read, the node reports an error instead of sending `null` (on snap7 a read where every address failed used to be sent silently). Thanks [@Steve-Mcl](https://github.com/Steve-Mcl) (#59, #55)
+- **`s7-write` single mode accepts an array or a Buffer** for an address with a length (`DB1,INT20.3`, `DB1,BYTE10.4`); it used to refuse them, so array writes only worked in multi mode. An array sent to an address without a length is refused with a clear message. Thanks [@Steve-Mcl](https://github.com/Steve-Mcl) (#56, #54)
+
 ## [0.0.9] - 2026-10-04
 
 A large release, almost all of it contributed by [@Steve-Mcl](https://github.com/Steve-Mcl):
