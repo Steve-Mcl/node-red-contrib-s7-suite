@@ -1,5 +1,6 @@
 import { SimBackend } from '../../../src/backend/sim-backend';
 import { S7ConnectionConfig } from '../../../src/types/s7-connection';
+import { parseAddress } from '../../../src/core/address-parser';
 
 const config: S7ConnectionConfig = {
   host: '127.0.0.1', port: 102, rack: 0, slot: 1,
@@ -243,5 +244,32 @@ describe('SimBackend', () => {
   it('readSZL returns CPU info', async () => {
     const buf = await backend.readSZL(0x001c, 0);
     expect(buf.toString()).toContain('Simulator');
+  });
+
+  describe('arrays', () => {
+    const rw = async (address: string, value: unknown): Promise<unknown> => {
+      await backend.write([{ name: 'a', address: parseAddress(address), value }]);
+      return (await backend.read([{ name: 'a', address: parseAddress(address) }]))[0].value;
+    };
+
+    it('writes and reads several bytes', async () => {
+      expect(await rw('DB1,BYTE40.0.4', [1, 2, 3, 4])).toEqual([1, 2, 3, 4]);
+      expect(await rw('DB1,BYTE40.4', Buffer.from([5, 6, 7, 8]))).toEqual([5, 6, 7, 8]);
+    });
+
+    it('writes and reads a bit array across a byte boundary', async () => {
+      await backend.write([{ name: 'z', address: parseAddress('DB1,BYTE40.2'), value: [0, 0] }]);
+      expect(await rw('DB1,X40.3.8', Array(8).fill(true))).toEqual(Array(8).fill(true));
+      const bytes = await backend.read([{ name: 'b', address: parseAddress('DB1,BYTE40.2') }]);
+      expect(bytes[0].value).toEqual([0xf8, 0x07]);
+    });
+
+    it('changes nothing when the value has the wrong length', async () => {
+      await backend.write([{ name: 'z', address: parseAddress('DB1,BYTE40.4'), value: [9, 9, 9, 9] }]);
+      await expect(backend.write([{ name: 'a', address: parseAddress('DB1,BYTE40.4'), value: [1, 2] }]))
+        .rejects.toThrow('needs 4 values; got 2');
+      const bytes = await backend.read([{ name: 'b', address: parseAddress('DB1,BYTE40.4') }]);
+      expect(bytes[0].value).toEqual([9, 9, 9, 9]);
+    });
   });
 });

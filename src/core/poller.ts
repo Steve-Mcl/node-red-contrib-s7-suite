@@ -113,11 +113,20 @@ export class Poller extends EventEmitter {
       return newValue !== oldVal;
     }
 
-    // DT/DTL values are a new Date object on every read, so compare the time they hold
-    if (newValue instanceof Date && oldVal instanceof Date) {
-      return newValue.getTime() !== oldVal.getTime();
-    }
-
-    return newValue !== oldVal;
+    // Dates, arrays and Buffers are new objects on every read, so compare what they hold
+    return !sameValue(newValue, oldVal);
   }
+}
+
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a instanceof Date && b instanceof Date) {
+    return a.getTime() === b.getTime();
+  }
+  if (Buffer.isBuffer(a) && Buffer.isBuffer(b)) {
+    return a.equals(b);
+  }
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((v, i) => sameValue(v, b[i]));
+  }
+  return a === b;
 }

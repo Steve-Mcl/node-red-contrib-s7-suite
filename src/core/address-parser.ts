@@ -2,13 +2,13 @@ import { S7Address, S7AreaType, S7DataType } from '../types';
 import { S7Error, S7ErrorCode } from '../utils/error-codes';
 
 const NODES7_REGEX =
-  /^(DB)(\d+),(BOOL|X|BYTE|WORD|DWORD|INT|DINT|REAL|LREAL|CHAR|STRING|USINT|UINT|UDINT|LINT|ULINT|DATE|TIME|TIME_OF_DAY|DATE_AND_TIME|DTLZ|DTL|DTZ|DT|S5TIME|WSTRING)(\d+)(?:\.(\d))?(?:\.(\d+))?$/i;
+  /^(DB)(\d+),(BOOL|X|BYTE|WORD|DWORD|INT|DINT|REAL|LREAL|CHAR|STRING|USINT|UINT|UDINT|LINT|ULINT|DATE|TIME|TIME_OF_DAY|DATE_AND_TIME|DTLZ|DTL|DTZ|DT|S5TIME|WSTRING)(\d+)(?:\.(\d+))?(?:\.(\d+))?$/i;
 
 const IEC_REGEX =
   /^(DB)(\d+)\.(DBX|DBB|DBW|DBD)(\d+)(?:\.(\d))?$/i;
 
 const AREA_REGEX =
-  /^([MIQCT])(X|B|W|D)?(\d+)(?:\.(\d))?(?:\.(\d+))?$/i;
+  /^([MIQCT])(X|B|W|D)?(\d+)(?:\.(\d+))?(?:\.(\d+))?$/i;
 
 const IEC_TYPE_MAP: Record<string, S7DataType> = {
   DBX: 'BOOL',
@@ -112,12 +112,37 @@ function validateAddress(addr: S7Address, raw: string): void {
   if (addr.dataType === 'BOOL' && (addr.bitOffset < 0 || addr.bitOffset > 7)) {
     throw new S7Error(S7ErrorCode.INVALID_ADDRESS, `Bit offset must be 0-7 for BOOL in address: "${raw}"`);
   }
+  if (addr.arrayLength !== undefined && addr.arrayLength < 1) {
+    throw new S7Error(S7ErrorCode.INVALID_ADDRESS, `Array length must be 1 or more in address: "${raw}"`);
+  }
   if (addr.stringLength !== undefined) {
     const max = addr.dataType === 'WSTRING' ? 16382 : 254;
     if (addr.stringLength < 1 || addr.stringLength > max) {
       throw new S7Error(S7ErrorCode.INVALID_ADDRESS, `${addr.dataType} length must be 1-${max} in address: "${raw}"`);
     }
   }
+}
+
+/**
+ * Works out what the numbers after the offset mean. For a bit the first is the bit offset and
+ * the second a count of consecutive bits (DB1,X10.3.8). For any other type a single number is
+ * the array length, as in nodes7 (DB1,BYTE10.4), and the longer DB1,BYTE10.0.4 form means the same.
+ */
+function bitAndCount(
+  isBit: boolean, first: string | undefined, second: string | undefined, raw: string,
+): { bitOffset: number; arrayLength: number | undefined } {
+  const a = first !== undefined ? parseInt(first, 10) : undefined;
+  const b = second !== undefined ? parseInt(second, 10) : undefined;
+  if (isBit) {
+    return { bitOffset: a ?? 0, arrayLength: b };
+  }
+  if (b === undefined) {
+    return { bitOffset: 0, arrayLength: a };
+  }
+  if (a !== 0) {
+    throw new S7Error(S7ErrorCode.INVALID_ADDRESS, `Bit offset ${a} is only valid for a BOOL in address: "${raw}"`);
+  }
+  return { bitOffset: 0, arrayLength: b };
 }
 
 function tryParseNodes7Style(input: string): S7Address | null {
@@ -138,8 +163,7 @@ function tryParseNodes7Style(input: string): S7Address | null {
     return result;
   }
 
-  const bitOffset = match[5] !== undefined ? parseInt(match[5], 10) : 0;
-  const arrayLength = match[6] !== undefined ? parseInt(match[6], 10) : undefined;
+  const { bitOffset, arrayLength } = bitAndCount(dataType === 'BOOL', match[5], match[6], input);
 
   return {
     area: 'DB',
@@ -182,8 +206,6 @@ function tryParseAreaStyle(input: string): S7Address | null {
 
   const sizeLetter = match[2]?.toUpperCase();
   const offset = parseInt(match[3], 10);
-  const bitOffset = match[4] !== undefined ? parseInt(match[4], 10) : 0;
-  const arrayLength = match[5] !== undefined ? parseInt(match[5], 10) : undefined;
 
   let dataType: S7DataType;
   if (sizeLetter) {
@@ -198,6 +220,8 @@ function tryParseAreaStyle(input: string): S7Address | null {
   if ((area === 'C' || area === 'T') && !sizeLetter && match[4] === undefined) {
     dataType = 'WORD';
   }
+
+  const { bitOffset, arrayLength } = bitAndCount(dataType === 'BOOL', match[4], match[5], input);
 
   return {
     area,
@@ -229,7 +253,8 @@ export function toNodes7Address(addr: S7Address): string {
 
   const prefix = addr.area;
   if (addr.dataType === 'BOOL') {
-    return `${prefix}${addr.offset}.${addr.bitOffset}`;
+    const bit = `${prefix}${addr.offset}.${addr.bitOffset}`;
+    return addr.arrayLength !== undefined ? `${bit}.${addr.arrayLength}` : bit;
   }
 
   const sizeMap: Partial<Record<S7DataType, string>> = {

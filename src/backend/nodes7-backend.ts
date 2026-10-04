@@ -3,7 +3,7 @@ import { S7ConnectionConfig } from '../types/s7-connection';
 import { S7ReadItem, S7ReadResult, S7WriteItem, AREA_CODE_MAP } from '../types/s7-address';
 import { S7BlockInfo, S7BlockList, S7BlockType } from '../types/s7-browse';
 import { toNodes7Address } from '../core/address-parser';
-import { stringWrite } from '../core/data-converter';
+import { arrayValues, stringWrite } from '../core/data-converter';
 import { S7Error, S7ErrorCode, describeError, describeRawRequest } from '../utils/error-codes';
 
 const BAD_QUALITY_HINT = ' (check that the address exists and is within the area or DB size)';
@@ -15,10 +15,13 @@ const BAD_QUALITY_HINT = ' (check that the address exists and is within the area
  */
 function failureDetail(err: unknown, addrs: string[], values?: Record<string, unknown>): string {
   if (err instanceof Error) return err.message;
-  const isBad = (v: unknown): boolean =>
-    (Array.isArray(v) ? v : [v]).some((q) => typeof q === 'string' && /^BAD \d+$/.test(q));
-  const bad = values ? addrs.filter((a) => isBad(values[a])) : [];
+  const bad = values ? addrs.filter((a) => isBadQuality(values[a])) : [];
   return `bad quality for ${(bad.length > 0 ? bad : addrs).join(', ')}${BAD_QUALITY_HINT}`;
+}
+
+/** True for the "BAD nnn" quality nodes7 returns in place of a value it couldn't read. */
+function isBadQuality(v: unknown): boolean {
+  return (Array.isArray(v) ? v : [v]).some((q) => typeof q === 'string' && /^BAD \d+$/.test(q));
 }
 
 const causeOf = (err: unknown): Error | undefined => (err instanceof Error ? err : undefined);
@@ -161,17 +164,20 @@ export class NodeS7Backend implements IS7Backend {
     // Addresses nodes7 can't handle are reported bad without being sent to it
     const addrList = prepared.filter((p) => !p.unsupported).map((p) => p.addr);
 
-    const toResults = (values: Record<string, unknown>): S7ReadResult[] =>
+    // anyBad is nodes7's flag that some item came back as a "BAD nnn" quality instead of a value
+    const toResults = (values: Record<string, unknown>, anyBad = false): S7ReadResult[] =>
       prepared.map(({ item, addr, unsupported }) => {
         const value = unsupported ? undefined : values[addr];
-        const isBad = value === undefined || value === null;
+        const badQuality = anyBad && isBadQuality(value);
+        const isBad = value === undefined || value === null || badQuality;
         return {
           name: item.name,
           address: item.address,
           value: isBad ? null : value,
           quality: isBad ? 'bad' : 'good',
           timestamp: Date.now(),
-          error: unsupported ?? (isBad ? 'No value returned' : undefined),
+          error: unsupported
+            ?? (badQuality ? `bad quality for ${addr}${BAD_QUALITY_HINT}` : isBad ? 'No value returned' : undefined),
         };
       });
 
@@ -198,7 +204,12 @@ export class NodeS7Backend implements IS7Backend {
             reject(this.lostError('read'));
             return;
           }
-          if (err) {
+          // nodes7 sets one flag for the whole read but still returns every item. When some of
+          // them are good, report the bad ones per item, as the snap7 backend does; fail the
+          // read only when nothing came back good.
+          const someGood = !(err instanceof Error) && values
+            && addrList.some((a) => values[a] !== undefined && values[a] !== null && !isBadQuality(values[a]));
+          if (err && !someGood) {
             reject(new S7Error(
               S7ErrorCode.READ_FAILED,
               `nodes7 read failed: ${failureDetail(err, addrList, values)}`,
@@ -207,7 +218,7 @@ export class NodeS7Backend implements IS7Backend {
             return;
           }
 
-          resolve(toResults(values));
+          resolve(toResults(values, Boolean(err)));
         });
       } catch (e) {
         removeAll();
@@ -226,7 +237,9 @@ export class NodeS7Backend implements IS7Backend {
       if (type === 'STRING' || type === 'WSTRING') {
         prepared.push(await this.prepareStringWrite(item));
       } else {
-        prepared.push({ name: item.nodes7Address ?? toNodes7Address(item.address), value: item.value });
+        // nodes7 would pad a short array with zeros; refuse it, as the snap7 backend does
+        const value = item.address.arrayLength !== undefined ? Array.from(arrayValues(item.address, item.value)) : item.value;
+        prepared.push({ name: item.nodes7Address ?? toNodes7Address(item.address), value });
       }
     }
 

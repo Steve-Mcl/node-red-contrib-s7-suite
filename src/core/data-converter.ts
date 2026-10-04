@@ -1,4 +1,4 @@
-import { Int64Mode, S7DataType } from '../types';
+import { Int64Mode, S7Address, S7DataType } from '../types';
 import { S7Error, S7ErrorCode } from '../utils/error-codes';
 
 export interface ReadOptions {
@@ -319,6 +319,80 @@ export function stringWrite(
     pos = wide ? bytes.writeUInt16BE(text.charCodeAt(i), pos) : bytes.writeUInt8(text.charCodeAt(i) & 0xff, pos);
   }
   return { start: writeMax ? 0 : lenSize, bytes };
+}
+
+/**
+ * Number of bytes an address covers. An array of bits is packed, as in the PLC: DB1,X10.3.8 is
+ * 8 consecutive bits from bit 3 of byte 10, so it spans 2 bytes.
+ */
+export function addressByteLength(addr: S7Address): number {
+  if (addr.arrayLength === undefined) return byteLength(addr.dataType, addr.stringLength);
+  if (addr.dataType === 'BOOL') return Math.ceil((addr.bitOffset + addr.arrayLength) / 8);
+  return byteLength(addr.dataType, addr.stringLength) * addr.arrayLength;
+}
+
+/** Reads the value of an address (a single value, or an array when it has a length) at `start`. */
+export function readAddressValue(buffer: Buffer, start: number, addr: S7Address, options: ReadOptions = {}): unknown {
+  if (addr.arrayLength === undefined) {
+    return readValue(buffer, start, addr.dataType, addr.bitOffset, options);
+  }
+  const len = byteLength(addr.dataType, addr.stringLength);
+  const values: unknown[] = [];
+  for (let i = 0; i < addr.arrayLength; i++) {
+    if (addr.dataType === 'BOOL') {
+      const bit = addr.bitOffset + i;
+      values.push(readValue(buffer, start + (bit >> 3), 'BOOL', bit & 7, options));
+    } else {
+      values.push(readValue(buffer, start + i * len, addr.dataType, 0, options));
+    }
+  }
+  return values;
+}
+
+/**
+ * Writes the value of an address into a buffer at `start`. An address with a length takes an
+ * array of that many values (or a Buffer, for a byte array). For bits the buffer must already
+ * hold the bytes as they are in the PLC, so the other bits in them are kept.
+ */
+export function writeAddressValue(buffer: Buffer, start: number, addr: S7Address, value: unknown): void {
+  if (addr.arrayLength === undefined) {
+    writeValue(buffer, start, addr.dataType, value, addr.bitOffset);
+    return;
+  }
+  const values = arrayValues(addr, value);
+  const len = byteLength(addr.dataType, addr.stringLength);
+  for (let i = 0; i < addr.arrayLength; i++) {
+    if (addr.dataType === 'BOOL') {
+      const bit = addr.bitOffset + i;
+      writeValue(buffer, start + (bit >> 3), 'BOOL', values[i], bit & 7);
+    } else {
+      writeValue(buffer, start + i * len, addr.dataType, values[i], 0);
+    }
+  }
+}
+
+/**
+ * Checks the value written to an address that has a length: it must be an array (or a Buffer,
+ * for a byte array) with exactly that many values. Anything else is rejected rather than
+ * written short.
+ */
+export function arrayValues(addr: S7Address, value: unknown): ArrayLike<unknown> {
+  const byteSized = addr.dataType === 'BYTE' || addr.dataType === 'USINT';
+  const values: ArrayLike<unknown> | undefined =
+    Array.isArray(value) ? value : byteSized && Buffer.isBuffer(value) ? value : undefined;
+  if (!values) {
+    throw new S7Error(
+      S7ErrorCode.WRITE_FAILED,
+      `An array of ${addr.arrayLength} ${addr.dataType} needs an array${byteSized ? ' or a Buffer' : ''} of values`,
+    );
+  }
+  if (values.length !== addr.arrayLength) {
+    throw new S7Error(
+      S7ErrorCode.WRITE_FAILED,
+      `An array of ${addr.arrayLength} ${addr.dataType} needs ${addr.arrayLength} values; got ${values.length}`,
+    );
+  }
+  return values;
 }
 
 /** Writes a typed value into a buffer at the given offset. */

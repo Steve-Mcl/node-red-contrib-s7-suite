@@ -2,7 +2,7 @@ import { IS7Backend } from './s7-backend.interface';
 import { S7ConnectionConfig } from '../types/s7-connection';
 import { S7ReadItem, S7ReadResult, S7WriteItem } from '../types/s7-address';
 import { S7BlockInfo, S7BlockList, S7BlockType } from '../types/s7-browse';
-import { byteLength, readValue, ReadOptions, stringWrite, writeValue } from '../core/data-converter';
+import { addressByteLength, readAddressValue, ReadOptions, stringWrite, writeAddressValue } from '../core/data-converter';
 
 export class SimBackend implements IS7Backend {
   private connected = false;
@@ -71,7 +71,7 @@ export class SimBackend implements IS7Backend {
           };
         }
 
-        const len = byteLength(addr.dataType, addr.stringLength);
+        const len = addressByteLength(addr);
         if (addr.offset + len > buf.length) {
           return {
             name: item.name, address: addr, value: null,
@@ -80,7 +80,7 @@ export class SimBackend implements IS7Backend {
           };
         }
 
-        const value = readValue(buf, addr.offset, addr.dataType, addr.bitOffset, this.readOptions);
+        const value = readAddressValue(buf, addr.offset, addr, this.readOptions);
 
         return {
           name: item.name, address: addr, value,
@@ -104,7 +104,7 @@ export class SimBackend implements IS7Backend {
 
       if (!buf) {
         // Auto-create area
-        const size = Math.max(addr.offset + byteLength(addr.dataType, addr.stringLength), 100);
+        const size = Math.max(addr.offset + addressByteLength(addr), 100);
         this.initArea(key, size);
         buf = this.memory.get(key)!;
       }
@@ -123,7 +123,14 @@ export class SimBackend implements IS7Backend {
         }
         bytes.copy(buf, addr.offset + start);
       } else {
-        writeValue(buf, addr.offset, addr.dataType, item.value, addr.bitOffset);
+        const len = addressByteLength(addr);
+        if (addr.offset + len > buf.length) {
+          throw new Error(`Offset ${addr.offset} out of range (area size: ${buf.length})`);
+        }
+        // Work on a copy so a rejected value (e.g. an array of the wrong length) changes nothing
+        const bytes = Buffer.from(buf.subarray(addr.offset, addr.offset + len));
+        writeAddressValue(bytes, 0, addr, item.value);
+        bytes.copy(buf, addr.offset);
       }
     }
   }
