@@ -27,6 +27,29 @@ describe('address-parser', () => {
       });
     });
 
+    it('parses DB with X (nodes7 bit) as BOOL', () => {
+      const addr = parseAddress('DB10,X4.3');
+      expect(addr).toEqual({
+        area: 'DB',
+        dbNumber: 10,
+        dataType: 'BOOL',
+        offset: 4,
+        bitOffset: 3,
+        arrayLength: undefined,
+      });
+    });
+
+    it('parses DB X with array length', () => {
+      const addr = parseAddress('db1,x0.0.8');
+      expect(addr.dataType).toBe('BOOL');
+      expect(addr.bitOffset).toBe(0);
+      expect(addr.arrayLength).toBe(8);
+    });
+
+    it('rejects DB X with bit offset > 7', () => {
+      expect(() => parseAddress('DB1,X0.8')).toThrow(/Bit offset must be 0-7/);
+    });
+
     it('parses DB with INT type', () => {
       const addr = parseAddress('DB5,INT10');
       expect(addr.area).toBe('DB');
@@ -195,7 +218,7 @@ describe('address-parser', () => {
       expect(toNodes7Address(addr)).toBe('DB1,REAL0');
     });
 
-    it('converts DB BOOL address with bit offset', () => {
+    it('converts DB BOOL address to the nodes7 X type', () => {
       const addr: S7Address = {
         area: 'DB',
         dbNumber: 10,
@@ -203,7 +226,23 @@ describe('address-parser', () => {
         offset: 4,
         bitOffset: 3,
       };
-      expect(toNodes7Address(addr)).toBe('DB10,BOOL4.3');
+      expect(toNodes7Address(addr)).toBe('DB10,X4.3');
+    });
+
+    it('converts DB BOOL array to the nodes7 X type', () => {
+      const addr: S7Address = {
+        area: 'DB',
+        dbNumber: 1,
+        dataType: 'BOOL',
+        offset: 0,
+        bitOffset: 0,
+        arrayLength: 8,
+      };
+      expect(toNodes7Address(addr)).toBe('DB1,X0.0.8');
+    });
+
+    it.each(['DB1,BOOL6.2', 'DB1.DBX6.2', 'DB1,X6.2'])('sends %s to nodes7 as DB1,X6.2', (input) => {
+      expect(toNodes7Address(parseAddress(input))).toBe('DB1,X6.2');
     });
 
     it('converts DB BYTE array', () => {
