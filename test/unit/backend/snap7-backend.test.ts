@@ -30,6 +30,7 @@ jest.mock('node-snap7', () => ({
     ListBlocksOfType: mockListBlocksOfType,
     GetAgBlockInfo: mockGetAgBlockInfo,
     ReadSZL: mockReadSZL,
+    RemotePort: 2,
     PingTimeout: 5,
   })),
 }));
@@ -75,6 +76,24 @@ describe('Snap7Backend', () => {
 
       expect(mockSetConnectionParams).toHaveBeenCalledWith('192.168.1.100', 0x0100, 0x0200);
       expect(mockConnect).toHaveBeenCalled();
+    });
+
+    it.each([
+      ['rack/slot', {}],
+      ['TSAP', { plcType: 'LOGO' as const, localTSAP: 0x0100, remoteTSAP: 0x0200 }],
+    ])('sets the configured port before connecting (%s)', async (_label, extra) => {
+      const order: string[] = [];
+      mockSetParam.mockImplementation((param: number, value: number) => order.push(`SetParam(${param},${value})`));
+      mockConnectTo.mockImplementation((_h: unknown, _r: unknown, _s: unknown, cb: Function) => { order.push('connect'); cb(); });
+      mockConnect.mockImplementation((cb: Function) => { order.push('connect'); cb(); });
+
+      await backend.connect({
+        host: '127.0.0.1', port: 10102, rack: 0, slot: 1, plcType: 'S7-1200', backend: 'snap7', ...extra,
+      });
+
+      // RemotePort is snap7 parameter 2
+      expect(order.indexOf('SetParam(2,10102)')).toBeGreaterThanOrEqual(0);
+      expect(order.indexOf('SetParam(2,10102)')).toBeLessThan(order.indexOf('connect'));
     });
 
     it('handles connection failure', async () => {
