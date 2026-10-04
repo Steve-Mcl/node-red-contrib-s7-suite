@@ -63,12 +63,23 @@
   // Browse dialog with tree/category structure
   // opts: { btnId, closeId, filterId, statusId, resultsId, dialogId, serverId, addressId, mode: 'replace'|'append'|'list', listRef }
   window.s7SuiteBrowseDialog = function (opts) {
+    // The browser's height changes as it opens, loads, filters and expands; let the node's
+    // oneditresize give its lists what is left
+    function resize() {
+      if (RED.tray && RED.tray.resize) RED.tray.resize();
+    }
+    function hideDialog() {
+      $(opts.dialogId).hide();
+      resize();
+    }
+
     function fetchAndRenderBrowse() {
       var serverId = $(opts.serverId).val();
       if (!serverId) { RED.notify('Select a server first', 'warning'); return; }
       $(opts.statusId).text('Browsing...').css('color', '#666').show();
       $(opts.resultsId).empty();
       $(opts.dialogId).show();
+      resize();
       $.getJSON('s7-suite/browse/' + serverId, function (data) {
         $(opts.statusId).hide();
         var addresses = data.addresses || [];
@@ -89,18 +100,33 @@
           groups[cat].push(a);
         });
 
+        // An address field may be a typedInput (s7-write); a browsed address is a fixed one
+        function getAddress() {
+          var el = $(opts.addressId);
+          return el.data('noderedTypedInput') ? el.typedInput('value') : el.val();
+        }
+        function setAddress(value) {
+          var el = $(opts.addressId);
+          if (el.data('noderedTypedInput')) {
+            el.typedInput('type', 'str');
+            el.typedInput('value', value);
+          } else {
+            el.val(value);
+          }
+        }
+
         function selectAddress(addr) {
           if (opts.mode === 'list' && opts.listRef) {
             opts.listRef.editableList('addItem', { address: addr });
             RED.notify('Added: ' + addr, 'success');
           } else if (opts.mode === 'append') {
-            var cur = $(opts.addressId).val().trim();
+            var cur = (getAddress() || '').trim();
             if (cur) cur += ' ';
-            $(opts.addressId).val(cur + addr);
+            setAddress(cur + addr);
             RED.notify('Added: ' + addr, 'success');
           } else {
-            $(opts.addressId).val(addr);
-            $(opts.dialogId).hide();
+            setAddress(addr);
+            hideDialog();
           }
         }
 
@@ -172,7 +198,7 @@
 
             header.on('click', function () {
               var visible = body.is(':visible');
-              body.slideToggle(150);
+              body.slideToggle(150, resize);
               arrow.css('transform', visible ? '' : 'rotate(90deg)');
             });
 
@@ -183,6 +209,7 @@
             container.append('<div style="padding:8px;color:#999;">No matches</div>');
           }
           $(opts.resultsId).empty().append(container);
+          resize();
         }
 
         render('');
@@ -190,11 +217,12 @@
       }).fail(function (xhr) {
         var msg = xhr.responseJSON ? xhr.responseJSON.error : 'Browse failed';
         $(opts.statusId).text(msg).css('color', 'red');
+        resize();
       });
     }
 
     $(opts.btnId).on('click', function () { fetchAndRenderBrowse(); });
-    $(opts.closeId).on('click', function () { $(opts.dialogId).hide(); });
+    $(opts.closeId).on('click', hideDialog);
     // Refresh button support: if opts.refreshId is provided, bind it
     if (opts.refreshId) {
       $(opts.refreshId).on('click', function () { fetchAndRenderBrowse(); });

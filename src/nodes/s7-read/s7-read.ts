@@ -4,6 +4,7 @@ import { parseAddress, toNodes7Address, splitAddresses } from '../../core/addres
 import { S7ReadItem, S7ReadResult, S7StructField, AREA_CODE_MAP } from '../../types/s7-address';
 import { readValue, byteLength } from '../../core/data-converter';
 import { createStatusUpdater } from '../shared/status-helper';
+import { AddressEntry, evaluateProperty, toAddressEntries } from '../shared/msg-source';
 
 interface S7ReadNodeDef extends NodeDef {
   server: string;
@@ -12,6 +13,12 @@ interface S7ReadNodeDef extends NodeDef {
   outputMode: 'single' | 'object' | 'buffer' | 'struct' | 'bits';
   topic: string;
   schema: string; // JSON-encoded S7StructField[]
+  // Where the addresses and schema come from: 'config' (this node, the default) or a typedInput
+  // type (msg, flow, global, env) with the property in addressProp / schemaProp
+  addressType?: string;
+  addressProp?: string;
+  schemaType?: string;
+  schemaProp?: string;
 }
 
 export = function (RED: NodeAPI): void {
@@ -31,26 +38,40 @@ export = function (RED: NodeAPI): void {
     serverNode.connectionManager.on('stateChanged', updateStatus);
     updateStatus({ newState: serverNode.connectionManager.getState() });
 
+    const addressType = config.addressType || 'config';
+    const schemaType = config.schemaType || 'config';
+
+    // The addresses to read: this node's list, or whatever the chosen msg/flow/global/env
+    // property holds. Nothing else in the message can change them.
+    const resolveAddresses = async (msg: NodeMessage): Promise<AddressEntry[]> => {
+      if (addressType === 'config') {
+        let labelMap: Record<string, string> = {};
+        try {
+          labelMap = JSON.parse(config.labels || '{}');
+        } catch { /* ignore */ }
+        return splitAddresses(config.address || '').map((address) => ({ address, label: labelMap[address] }));
+      }
+      const prop = config.addressProp || '';
+      const value = await evaluateProperty(RED, this, msg, addressType, prop);
+      return toAddressEntries(value, `${addressType}.${prop}`);
+    };
+
+    // buffer, bits and struct read one area, so they take exactly one address
+    const singleAddress = (entries: AddressEntry[], mode: string): string => {
+      if (entries.length === 0) throw new Error('No address specified');
+      if (entries.length > 1) throw new Error(`${mode} output reads one address; got ${entries.length}`);
+      return entries[0].address;
+    };
+
     this.on('input', async (msg: NodeMessage, _send, done) => {
       const send = _send || ((m: NodeMessage) => this.send(m));
 
       try {
-        const outputMode = ((msg as Record<string, unknown>).outputMode as string) || config.outputMode || 'single';
-
-        const topicAddress = typeof msg.topic === 'string' ? msg.topic : undefined;
-        if (msg.topic !== undefined && typeof msg.topic !== 'string') {
-          done(new Error('msg.topic must be a string'));
-          return;
-        }
+        const outputMode = config.outputMode || 'single';
+        const entries = await resolveAddresses(msg);
 
         if (outputMode === 'buffer' || outputMode === 'bits') {
-          const addressStr = topicAddress || config.address;
-          if (!addressStr) {
-            done(new Error('No address specified'));
-            return;
-          }
-
-          const parsed = parseAddress(addressStr.trim());
+          const parsed = parseAddress(singleAddress(entries, outputMode));
           const areaCode = AREA_CODE_MAP[parsed.area];
           if (areaCode === undefined) {
             done(new Error(`Unsupported area: ${parsed.area}`));
@@ -81,14 +102,12 @@ export = function (RED: NodeAPI): void {
         }
 
         if (outputMode === 'struct') {
-          const addressStr = topicAddress || config.address;
-          if (!addressStr) {
-            done(new Error('No address specified'));
-            return;
-          }
+          const addressStr = singleAddress(entries, outputMode);
 
-          // Schema from msg.schema (runtime override) or config
-          const schemaSource = (msg as Record<string, unknown>).schema || config.schema;
+          // The schema from this node, or from the chosen msg/flow/global property
+          const schemaSource = schemaType === 'config'
+            ? config.schema
+            : await evaluateProperty(RED, this, msg, schemaType, config.schemaProp || '');
           if (!schemaSource) {
             done(new Error('No schema specified'));
             return;
@@ -160,14 +179,13 @@ export = function (RED: NodeAPI): void {
           return;
         }
 
-        // Original single/object modes
-        const addressStr = topicAddress || config.address;
-        if (!addressStr) {
+        // single/object modes
+        if (entries.length === 0) {
           done(new Error('No address specified'));
           return;
         }
 
-        const addresses = splitAddresses(addressStr);
+        const addresses = entries.map((e) => e.address);
         const items: S7ReadItem[] = addresses.map((a, i) => {
           const parsed = parseAddress(a);
           return {
@@ -193,15 +211,10 @@ export = function (RED: NodeAPI): void {
         }
 
         if (outputMode === 'object' || addresses.length > 1) {
-          let labelMap: Record<string, string> = {};
-          try {
-            labelMap = JSON.parse(config.labels || '{}');
-          } catch { /* ignore */ }
-
+          // Keyed by label (from this node's list, or an object of { label: address }), else address
           const payload: Record<string, unknown> = {};
           for (let i = 0; i < results.length; i++) {
-            const key = labelMap[addresses[i]] || addresses[i];
-            payload[key] = results[i].value;
+            payload[entries[i].label || addresses[i]] = results[i].value;
           }
           send({ ...msg, payload } as NodeMessage);
         } else {

@@ -4,7 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Upgrade notes
+- **Messages no longer override a node's settings** (#26). s7-read and s7-write used to take `msg.topic` as the address, `msg.outputMode` / `msg.mode` as the mode and `msg.schema` as the schema whenever the message had them, even when the node was configured. A topic set for another reason (MQTT, an inject, routing) silently changed which address was read or written. Now the node uses its own settings, and you choose a dynamic source explicitly. The address (s7-read's **Address src**, s7-write's **Address**) is set in the node by default, or taken from `msg`, `flow`, `global` or `env`. The **Schema** is **Fixed** (set in the node) by default, or taken from `msg`, `flow` or `global`. To keep the old behaviour, set the address source to `msg.topic` and the schema source to `msg.schema` (choosing `msg` fills these in). The output and write mode can no longer be set from the message. s7-read also accepts an array of addresses or `{ label: address }` from a dynamic source.
+
 ### Fixed
+- **Address browser in `s7-read` / `s7-write`**: the address list now makes room for the browser instead of the browser being pushed off the bottom of the panel, the browser closes when the list or field it fills is hidden, and in `s7-write` it opens under the address field, which Struct write now shares, so its base address can be browsed too (#26)
 - **`s7-read` reports addresses that couldn't be read**: when some addresses in a read fail, the rest are sent, the failed ones as `null`, and the node logs a warning naming them and the reason. When none can be read, the node reports an error instead of sending `null` (on snap7 a read where every address failed used to be sent silently). Thanks [@Steve-Mcl](https://github.com/Steve-Mcl) (#59, #55)
 - **`s7-write` single mode accepts an array or a Buffer** for an address with a length (`DB1,INT20.3`, `DB1,BYTE10.4`); it used to refuse them, so array writes only worked in multi mode. An array sent to an address without a length is refused with a clear message. Thanks [@Steve-Mcl](https://github.com/Steve-Mcl) (#56, #54)
 

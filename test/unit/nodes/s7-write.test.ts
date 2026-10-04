@@ -19,8 +19,15 @@ describe('s7-write node', () => {
       }),
       getNode: jest.fn(),
     },
+    util: {
+      // msg and env, as Node-RED's evaluateNodeProperty resolves them
+      evaluateNodeProperty: jest.fn((value: string, type: string, _n: unknown, msg: Record<string, unknown>, cb: Function) => {
+        if (type === 'msg') cb(null, value.split('.').reduce((o: unknown, k) => (o as Record<string, unknown>)?.[k], msg));
+        else if (type === 'env') cb(null, process.env[value]);
+        else cb(new Error(`unsupported type ${type}`));
+      }),
+    },
   };
-
   function createServerNode() {
     mockBackend = new MockBackend();
     connManager = new ConnectionManager(mockBackend, {
@@ -157,27 +164,54 @@ describe('s7-write node', () => {
       expect(mockBackend.writeCalls).toHaveLength(0);
     });
 
-    it('uses msg.topic as address when provided', async () => {
+    it('ignores msg.topic and msg.mode: the configured address and mode are used', async () => {
       const node = createNodeContext();
-      constructorFn.call(node, {
-        id: 'write1',
-        type: 's7-write',
-        server: 'config1',
-        address: 'DB1,REAL0',
-      });
+      constructorFn.call(node, { id: 'write1', type: 's7-write', server: 'config1', address: 'DB1,REAL0' });
 
-      const msg = { _msgid: '123', payload: 10, topic: 'DB1,INT0' };
-      const send = jest.fn();
+      const msg = { _msgid: '123', payload: 10, topic: 'DB1,INT0', mode: 'multi' };
       const done = jest.fn();
-
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const inputHandler = (node as any).listeners('input')[0];
-      await inputHandler(msg, send, done);
+      await (node as any).listeners('input')[0](msg, jest.fn(), done);
 
-      // Should have used the topic address (INT0)
-      expect(mockBackend.writeCalls).toHaveLength(1);
-      expect(send).toHaveBeenCalledWith(msg);
+      expect(mockBackend.writeCalls[0][0].address).toMatchObject({ dataType: 'REAL', offset: 0 });
       expect(done).toHaveBeenCalledWith();
+    });
+
+    it('takes the address from a msg property or env var when told to', async () => {
+      process.env.S7_TEST_ADDRESS = 'DB1,DINT8';
+      for (const [addressType, address, msg] of [
+        ['msg', 'topic', { _msgid: '1', payload: 10, topic: 'DB1,INT0' }],
+        ['env', 'S7_TEST_ADDRESS', { _msgid: '2', payload: 10 }],
+      ] as const) {
+        const node = createNodeContext();
+        constructorFn.call(node, { id: 'write1', type: 's7-write', server: 'config1', address, addressType });
+        const done = jest.fn();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (node as any).listeners('input')[0](msg, jest.fn(), done);
+        expect(done).toHaveBeenCalledWith();
+      }
+      expect(mockBackend.writeCalls.map((c: Array<{ address: { dataType: string } }>) => c[0].address.dataType))
+        .toEqual(['INT', 'DINT']);
+      delete process.env.S7_TEST_ADDRESS;
+    });
+
+    it('refuses an address source that is not a string', async () => {
+      const node = createNodeContext();
+      constructorFn.call(node, { id: 'write1', type: 's7-write', server: 'config1', address: 'topic', addressType: 'msg' });
+      const done = jest.fn();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (node as any).listeners('input')[0]({ _msgid: '1', payload: 1, topic: ['DB1,INT0'] }, jest.fn(), done);
+      expect(done.mock.calls[0][0].message).toBe('msg.topic must be an address string (got object)');
+      expect(mockBackend.writeCalls).toHaveLength(0);
+    });
+
+    it('says which property was empty when the address source has nothing', async () => {
+      const node = createNodeContext();
+      constructorFn.call(node, { id: 'write1', type: 's7-write', server: 'config1', address: 'topic', addressType: 'msg' });
+      const done = jest.fn();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (node as any).listeners('input')[0]({ _msgid: '1', payload: 1 }, jest.fn(), done);
+      expect(done.mock.calls[0][0].message).toBe('No address in msg.topic');
     });
 
     it('calls done with error when no address is specified', async () => {
@@ -517,7 +551,7 @@ describe('s7-write node', () => {
           .toEqual(['DTLZ', 'ULINT', 'WSTRING']);
       });
 
-      it('uses msg.topic as base address', async () => {
+      it('takes the base address from msg.topic when told to', async () => {
         // DB2 area code = 0x84 = 132, dbNumber = 2, offset = 0
         const buf = Buffer.alloc(6);
         mockBackend.rawAreaData.set('132:2:0:6', buf);
@@ -527,7 +561,8 @@ describe('s7-write node', () => {
           id: 'write1',
           type: 's7-write',
           server: 'config1',
-          address: 'DB1,BYTE0',
+          address: 'topic',
+          addressType: 'msg',
           mode: 'struct',
           schema: validSchema,
         });
@@ -546,7 +581,22 @@ describe('s7-write node', () => {
         expect(done).toHaveBeenCalledWith();
       });
 
-      it('uses msg.schema to override config schema', async () => {
+      it('ignores msg.topic and msg.schema in struct mode by default', async () => {
+        mockBackend.rawAreaData.set('132:1:0:6', Buffer.alloc(6));
+        const node = createNodeContext();
+        constructorFn.call(node, {
+          id: 'write1', type: 's7-write', server: 'config1', address: 'DB1,BYTE0', mode: 'struct', schema: validSchema,
+        });
+        const msg = { _msgid: '1', payload: { temperature: 1 }, topic: 'DB2,BYTE0', schema: [{ name: 'x', type: 'BYTE', offset: 0 }] };
+        const done = jest.fn();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (node as any).listeners('input')[0](msg, jest.fn(), done);
+        expect(mockBackend.rawReadCalls[0].dbNumber).toBe(1);
+        expect(mockBackend.writeCalls[0][0].address).toMatchObject({ dataType: 'REAL' });
+        expect(done).toHaveBeenCalledWith();
+      });
+
+      it('takes the schema from msg.schema when told to', async () => {
         // Only a BYTE field at offset 0 => 1 byte needed
         const buf = Buffer.alloc(1);
         mockBackend.rawAreaData.set('132:1:0:1', buf);
@@ -563,6 +613,8 @@ describe('s7-write node', () => {
           address: 'DB1,BYTE0',
           mode: 'struct',
           schema: validSchema,
+          schemaType: 'msg',
+          schemaProp: 'schema',
         });
 
         const msg = { _msgid: '123', payload: { status: 1 }, schema: overrideSchema } as Record<string, unknown>;

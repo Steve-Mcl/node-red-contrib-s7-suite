@@ -9,14 +9,21 @@
       labels: { value: '{}' },
       outputMode: { value: 'single' },
       topic: { value: '' },
-      schema: { value: '[]' }
+      schema: { value: '[]' },
+      // Where the addresses and schema come from: 'config' (Fixed: set in this node) or msg/flow/global/env
+      addressType: { value: 'config' },
+      addressProp: { value: '' },
+      schemaType: { value: 'config' },
+      schemaProp: { value: '' }
     },
     inputs: 1,
     outputs: 1,
     icon: 's7-suite.svg',
     paletteLabel: 'S7 Read',
     label: function () {
-      return this.name || this.address || 'S7 Read';
+      if (this.name) return this.name;
+      if (this.addressType && this.addressType !== 'config') return this.addressType + '.' + (this.addressProp || '');
+      return this.address || 'S7 Read';
     },
     oneditprepare: function () {
       var node = this;
@@ -390,19 +397,40 @@
         }
       } catch (e) { /* ignore */ }
 
-      // Toggle UI sections based on outputMode
+      // Toggle UI sections based on outputMode and where the addresses and schema come from
+      // How a source reads in a tip: msg.topic, flow.x, global.x or env var X
+      function sourceName(input) {
+        var type = input.typedInput('type');
+        var value = input.typedInput('value');
+        return type === 'env' ? 'env var ' + value : type + '.' + value;
+      }
+
       function updateModeUI() {
         var mode = $('#node-input-outputMode').val();
         var isAddressList = (mode === 'single' || mode === 'object');
-        $('#s7r-address-list-section').toggle(isAddressList);
-        $('#s7r-single-address-section').toggle(!isAddressList);
+        var addressesHere = $('#node-input-addressProp').typedInput('type') === 'config';
+        var schemaHere = $('#node-input-schemaProp').typedInput('type') === 'config';
+        $('#s7r-address-list-section').toggle(addressesHere && isAddressList);
+        // The browser adds to that list; close it with the list so it is shut when the list comes back
+        if (!(addressesHere && isAddressList)) $('#s7r-browse-dialog').hide();
+        $('#s7r-single-address-section').toggle(addressesHere && !isAddressList);
         $('#s7r-schema-section').toggle(mode === 'struct');
+        $('#s7r-schema-section .s7r-list-row').toggle(schemaHere);
         $('#s7r-buffer-hint').toggle(mode === 'buffer');
         $('#s7r-bits-hint').toggle(mode === 'bits');
         $('#s7r-struct-hint').toggle(mode === 'struct');
+        // When the addresses or schema come from a property, say what it can hold
+        $('#s7r-address-src-tip').toggle(!addressesHere);
+        $('#s7r-address-src-tip .s7r-src-many').toggle(isAddressList);
+        $('#s7r-address-src-tip .s7r-src-one').toggle(!isAddressList);
+        $('#s7r-address-src-tip .s7r-src-single').toggle(mode === 'single');
+        $('#s7r-address-src-tip .s7r-src-object').toggle(mode === 'object');
+        $('.s7r-address-src').text(sourceName($('#node-input-addressProp')));
+        $('#s7r-schema-src-tip').toggle(!schemaHere);
+        $('.s7r-schema-src').text(sourceName($('#node-input-schemaProp')));
         // Both lists use Alt+A; only the visible one may own it
-        s7SuiteAccelerator(addrList, 'a', isAddressList);
-        s7SuiteAccelerator(schemaList, 'a', mode === 'struct');
+        s7SuiteAccelerator(addrList, 'a', addressesHere && isAddressList);
+        s7SuiteAccelerator(schemaList, 'a', mode === 'struct' && schemaHere);
       }
 
       $('#node-input-outputMode').on('change', function () {
@@ -422,6 +450,24 @@
         return mode === 'single' || mode === 'object' || !mode;
       }
 
+      // Where the addresses and schema come from: Fixed (the lists in this node), or a property the
+      // user names. Nothing in the message is used unless it is picked here.
+      var fromThisNode = { value: 'config', label: 'Fixed', icon: 'fa fa-list', hasValue: false };
+      // Nodes saved before these settings existed read their own config
+      if (!node.addressType) $('#node-input-addressType').val('config');
+      if (!node.schemaType) $('#node-input-schemaType').val('config');
+      function sourceInput(id, typeField, types, msgDefault) {
+        $(id).typedInput({ default: 'config', types: [fromThisNode].concat(types), typeField: typeField })
+          .on('change', function (event, type) {
+            // Picking msg starts from the usual property, so the old msg.topic / msg.schema is one click away
+            if (type === 'msg' && !$(id).typedInput('value')) $(id).typedInput('value', msgDefault);
+            updateModeUI();
+            RED.tray.resize();
+          });
+      }
+      sourceInput('#node-input-addressProp', '#node-input-addressType', ['msg', 'flow', 'global', 'env'], 'topic');
+      sourceInput('#node-input-schemaProp', '#node-input-schemaType', ['msg', 'flow', 'global'], 'schema');
+
       updateModeUI();
     },
     oneditresize: function (size) {
@@ -436,7 +482,8 @@
         var section = $(this);
         var listRow = section.children('.s7r-list-row');
         var listHeight = height;
-        section.children().not(listRow).each(function () {
+        // Visible ones only: jQuery measures a hidden element as if it were shown
+        section.children(':visible').not(listRow).each(function () {
           listHeight -= $(this).outerHeight(true);
         });
         listHeight -= parseInt(listRow.css('marginTop'), 10) + parseInt(listRow.css('marginBottom'), 10);
@@ -494,6 +541,13 @@
 </script>
 
 <script type="text/html" data-template-name="s7-read">
+  <style>
+    /* Tips sit under the input column and follow the tray's width: width 0 keeps their text from
+       widening the tray when it opens, min-width then fills the column */
+    .s7-tip { box-sizing: border-box; width: 0; min-width: 70%; max-width: none; margin: 0 0 12px 104px; }
+    .s7-tip code { white-space: normal; overflow-wrap: anywhere; }
+    .s7-tip p:last-child { margin-bottom: 0; }
+  </style>
   <div class="form-row">
     <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
     <input type="text" id="node-input-name" placeholder="Name">
@@ -507,13 +561,44 @@
   </div>
   <div class="form-row">
     <label for="node-input-outputMode"><i class="fa fa-list"></i> Output</label>
-    <select id="node-input-outputMode">
+    <select id="node-input-outputMode" style="width:70%;">
       <option value="single">Single value</option>
       <option value="object">Object (key=address)</option>
       <option value="buffer">Raw Buffer</option>
       <option value="struct">Struct (schema)</option>
       <option value="bits">Bit Array</option>
     </select>
+  </div>
+  <div id="s7r-buffer-hint" style="display:none;" class="form-tips s7-tip">
+    <p>Reads raw bytes from the PLC. Use <code>DB1,BYTE0.0.100</code> to read 100 bytes from DB1 offset 0.</p>
+    <p><code>msg.payload</code> will be a Node.js <code>Buffer</code>.</p>
+  </div>
+  <div id="s7r-bits-hint" style="display:none;" class="form-tips s7-tip">
+    <p>Reads bytes and unpacks them into a boolean array (LSB first).</p>
+    <p>Use <code>DB1,BYTE0.0.2</code> to read 2 bytes = 16 bits. <code>msg.payload</code> will be <code>[true, false, ...]</code>.</p>
+  </div>
+  <div id="s7r-struct-hint" style="display:none;" class="form-tips s7-tip">
+    <p>Reads a data block area and extracts fields according to the schema. The address is the DB area
+    to start from (e.g. <code>DB1,BYTE0</code>).</p>
+  </div>
+  <div class="form-row">
+    <label for="node-input-addressProp"><i class="fa fa-sign-in"></i> Address src</label>
+    <input type="text" id="node-input-addressProp" style="width:70%;">
+    <input type="hidden" id="node-input-addressType">
+  </div>
+  <div id="s7r-address-src-tip" class="form-tips s7-tip" style="display:none;">
+    <p class="s7r-src-many"><code class="s7r-address-src">msg.topic</code> can be a single address
+    (<code>"DB1,INT4"</code>), multiple addresses separated by spaces or semicolons
+    (<code>"DB1,INT4 DB1,REAL8"</code>), an object of labels and addresses
+    (<code>{"speed": "DB1,INT4", "temp": "DB1,REAL8"}</code>) or an array
+    (<code>["DB1,INT4", "DB1,REAL8"]</code>).</p>
+    <p class="s7r-src-single">A single address, or an object or array with only one entry, outputs just the
+    value. Two or more addresses output an object, keyed by label when you send an object and by address
+    otherwise. To always get an object, set Output to Object.</p>
+    <p class="s7r-src-object">The payload is always an object, keyed by label when you send an object and by
+    address otherwise.</p>
+    <p class="s7r-src-one"><code class="s7r-address-src">msg.topic</code> must hold one address string, for
+    example <code>"DB1,BYTE0.0.100"</code>.</p>
   </div>
   <div id="s7r-address-list-section">
     <div class="form-row">
@@ -525,6 +610,18 @@
         </div>
       </div>
     </div>
+    <div id="s7r-browse-dialog" style="display:none;border:1px solid #ccc;border-radius:4px;padding:8px;margin:0 0 12px;background:#fafafa;max-height:400px;overflow:hidden;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <b><i class="fa fa-sitemap"></i> PLC Address Browser</b>
+        <div>
+          <button type="button" id="s7r-browse-refresh" class="red-ui-button red-ui-button-small" style="margin-right:4px;"><i class="fa fa-refresh"></i></button>
+          <button type="button" id="s7r-browse-close" class="red-ui-button red-ui-button-small"><i class="fa fa-times"></i></button>
+        </div>
+      </div>
+      <input type="text" id="s7r-browse-filter" placeholder="Filter (e.g. DB1, REAL, Merker...)" style="width:100%;margin-bottom:6px;padding:4px;">
+      <div id="s7r-browse-status" style="padding:8px;color:#666;display:none;"></div>
+      <div id="s7r-browse-results" style="max-height:300px;overflow-y:auto;"></div>
+    </div>
     <div class="form-row s7r-list-row">
       <ol id="s7r-address-list"></ol>
     </div>
@@ -535,48 +632,38 @@
       <input type="text" id="s7r-single-address-input" placeholder="DB1,BYTE0.0.100" style="width:70%;">
     </div>
   </div>
-  <div id="s7r-buffer-hint" style="display:none;" class="form-tips">
-    <p>Reads raw bytes from the PLC. Use <code>DB1,BYTE0.0.100</code> to read 100 bytes from DB1 offset 0.</p>
-    <p><code>msg.payload</code> will be a Node.js <code>Buffer</code>.</p>
-  </div>
-  <div id="s7r-bits-hint" style="display:none;" class="form-tips">
-    <p>Reads bytes and unpacks them into a boolean array (LSB first).</p>
-    <p>Use <code>DB1,BYTE0.0.2</code> to read 2 bytes = 16 bits. <code>msg.payload</code> will be <code>[true, false, ...]</code>.</p>
-  </div>
-  <div id="s7r-struct-hint" style="display:none;" class="form-tips">
-    <p>Reads a data block area and extracts fields according to the schema below.</p>
-    <p>The address field specifies the DB (e.g. <code>DB1,BYTE0</code>). Schema can be overridden at runtime via <code>msg.schema</code>.</p>
-  </div>
   <div id="s7r-schema-section" style="display:none;">
     <div class="form-row">
-      <label style="vertical-align:top;"><i class="fa fa-th-list"></i> Schema</label>
+      <label for="node-input-schemaProp"><i class="fa fa-th-list"></i> Schema</label>
+      <input type="text" id="node-input-schemaProp" style="width:70%;">
+      <input type="hidden" id="node-input-schemaType">
+    </div>
+    <div id="s7r-schema-src-tip" class="form-tips s7-tip" style="display:none;">
+      <p><code class="s7r-schema-src">msg.schema</code> must hold the schema: an array of fields such as
+      <code>[{"name": "temp", "type": "REAL", "offset": 0}]</code>, or the same as a JSON string. A BOOL
+      field also takes <code>"bit"</code>, a STRING or WSTRING <code>"length"</code>.</p>
     </div>
     <div class="form-row s7r-list-row">
       <ol id="s7r-schema-list"></ol>
     </div>
   </div>
-  <div id="s7r-browse-dialog" style="display:none;border:1px solid #ccc;border-radius:4px;padding:8px;margin-top:8px;background:#fafafa;max-height:400px;overflow:hidden;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-      <b><i class="fa fa-sitemap"></i> PLC Address Browser</b>
-      <div>
-        <button type="button" id="s7r-browse-refresh" class="red-ui-button red-ui-button-small" style="margin-right:4px;"><i class="fa fa-refresh"></i></button>
-        <button type="button" id="s7r-browse-close" class="red-ui-button red-ui-button-small"><i class="fa fa-times"></i></button>
-      </div>
-    </div>
-    <input type="text" id="s7r-browse-filter" placeholder="Filter (e.g. DB1, REAL, Merker...)" style="width:100%;margin-bottom:6px;padding:4px;">
-    <div id="s7r-browse-status" style="padding:8px;color:#666;display:none;"></div>
-    <div id="s7r-browse-results" style="max-height:300px;overflow-y:auto;"></div>
-  </div>
 </script>
 
 <script type="text/html" data-help-name="s7-read">
-  <p>Reads data from a Siemens S7 PLC.</p>
+  <p>Reads data from a Siemens S7 PLC. Any incoming message triggers a read.</p>
   <h3>Inputs</h3>
+  <p>By default the node reads the addresses and schema set in it, and nothing in the message
+  changes them. To take them from the message instead, change <b>Address src</b>
+  or <b>Schema</b> from <i>Fixed</i> to a source:</p>
   <dl class="message-properties">
-    <dt class="optional">topic <span class="property-type">string</span></dt>
-    <dd>Overrides the configured address</dd>
-    <dt class="optional">schema <span class="property-type">array</span></dt>
-    <dd>Overrides the configured schema (struct mode only)</dd>
+    <dt class="optional">Address src <span class="property-type">msg | flow | global | env</span></dt>
+    <dd>The property holding the addresses: a string (space- or semicolon-separated, e.g.
+    <code>"DB1,REAL4 DB1,INT8"</code>), an array of addresses, or an object of
+    <code>{ label: address }</code>, whose labels become the output keys. Choosing <code>msg</code>
+    starts from <code>msg.topic</code>. Buffer, bits and struct output read one address.</dd>
+    <dt class="optional">Schema <span class="property-type">msg | flow | global</span></dt>
+    <dd>The property holding the struct schema, as an array or a JSON string (struct output only).
+    Choosing <code>msg</code> starts from <code>msg.schema</code>.</dd>
   </dl>
   <h3>Outputs</h3>
   <dl class="message-properties">
@@ -588,7 +675,8 @@
   <h3>Output Modes</h3>
   <dl>
     <dt>Single value</dt>
-    <dd>Reads one address and returns the scalar value.</dd>
+    <dd>Reads one address and returns the scalar value. Given more than one address, it returns an
+    object as Object output does.</dd>
     <dt>Object</dt>
     <dd>Reads one or more addresses and returns an object. Keys are the label (if set) or address. Use <b>Import CSV/Excel/CFG/XML</b> to bulk-import tag lists from a TIA Portal tag table Export (.xlsx, .xml or .sdf), Step 7 symbol exports (.csv/.tsv), or STEP 7 V5 hardware configuration exports (.cfg). The CSV importer auto-detects column names (<code>name</code>/<code>symbol</code>/<code>tag</code> and <code>address</code>) and supports tab, semicolon and comma separators. IEC-style addresses with <code>%</code> prefix are converted automatically.<br>
     <b>.cfg import</b> reads the full hardware config exported from SIMATIC Manager via <em>Station → Export…</em> and extracts all symbolic I/O — including modules behind Profibus/Profinet couplers that a live browse cannot discover. Digital inputs/outputs become <code>I0.3</code>/<code>Q0.3</code> addresses, analog channels become <code>IW272</code>/<code>QW272</code>.<br>

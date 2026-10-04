@@ -4,12 +4,18 @@ import { parseAddress, toNodes7Address } from '../../core/address-parser';
 import { S7WriteItem, S7StructField, AREA_CODE_MAP } from '../../types/s7-address';
 import { writeValue, byteLength } from '../../core/data-converter';
 import { createStatusUpdater } from '../shared/status-helper';
+import { evaluateProperty } from '../shared/msg-source';
 
 interface S7WriteNodeDef extends NodeDef {
   server: string;
   address: string;
   mode: 'single' | 'multi' | 'struct';
   schema: string; // JSON-encoded S7StructField[]
+  // typedInput type of `address`: 'str' (a fixed address, the default), msg, flow, global or env
+  addressType?: string;
+  // Where the schema comes from: 'config' (this node, the default), msg, flow or global
+  schemaType?: string;
+  schemaProp?: string;
 }
 
 export = function (RED: NodeAPI): void {
@@ -29,17 +35,28 @@ export = function (RED: NodeAPI): void {
     serverNode.connectionManager.on('stateChanged', updateStatus);
     updateStatus({ newState: serverNode.connectionManager.getState() });
 
+    const addressType = config.addressType || 'str';
+    const schemaType = config.schemaType || 'config';
+
+    // The address to write: the one typed into this node, or whatever the chosen msg/flow/global/env
+    // property holds. Nothing else in the message can change it.
+    const resolveAddress = async (msg: NodeMessage): Promise<string> => {
+      if (addressType === 'str') return (config.address || '').trim();
+      const value = await evaluateProperty(RED, this, msg, addressType, config.address || '');
+      if (value === undefined || value === null || value === '') {
+        throw new Error(`No address in ${addressType}.${config.address}`);
+      }
+      if (typeof value !== 'string') {
+        throw new Error(`${addressType}.${config.address} must be an address string (got ${typeof value})`);
+      }
+      return value.trim();
+    };
+
     this.on('input', async (msg: NodeMessage, _send, done) => {
       const send = _send || ((m: NodeMessage) => this.send(m));
 
       try {
-        const mode = ((msg as Record<string, unknown>).mode as string) || config.mode || 'single';
-
-        if (msg.topic !== undefined && typeof msg.topic !== 'string') {
-          done(new Error('msg.topic must be a string'));
-          return;
-        }
-        const topicAddress = typeof msg.topic === 'string' ? msg.topic : undefined;
+        const mode = config.mode || 'single';
 
         if (mode === 'multi') {
           // Multi-write: msg.payload is an object { address: value, ... }
@@ -73,13 +90,16 @@ export = function (RED: NodeAPI): void {
 
         if (mode === 'struct') {
           // Struct-write: read-modify-write using schema
-          const addressStr = topicAddress || config.address;
+          const addressStr = await resolveAddress(msg);
           if (!addressStr) {
             done(new Error('No base address specified'));
             return;
           }
 
-          const schemaSource = (msg as Record<string, unknown>).schema || config.schema;
+          // The schema from this node, or from the chosen msg/flow/global property
+          const schemaSource = schemaType === 'config'
+            ? config.schema
+            : await evaluateProperty(RED, this, msg, schemaType, config.schemaProp || '');
           if (!schemaSource) {
             done(new Error('No schema specified'));
             return;
@@ -183,8 +203,8 @@ export = function (RED: NodeAPI): void {
           return;
         }
 
-        // Single mode (default): current behavior
-        const addressStr = topicAddress || config.address;
+        // Single mode (default)
+        const addressStr = await resolveAddress(msg);
         if (!addressStr) {
           done(new Error('No address specified'));
           return;

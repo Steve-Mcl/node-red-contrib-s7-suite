@@ -105,11 +105,12 @@ Host, port, rack, slot, the TSAPs, the timeouts and the reconnect intervals on `
 
 #### s7-read
 
-| Property | Type | Description |
+Any message triggers a read. The node reads the addresses and schema set in it; nothing in the message changes them. To take them from the message, set **Address src** or **Schema** to `msg` (or `flow`, `global`, `env`) and name the property:
+
+| Setting | Type | Description |
 |----------|------|-------------|
-| `msg.topic` | string | Overrides configured address |
-| `msg.outputMode` | string | Overrides output mode (`single`, `object`, `buffer`, `struct`, `bits`) |
-| `msg.schema` | object[] | Overrides struct schema (struct mode only) |
+| Address src | `msg` / `flow` / `global` / `env` | An address string (space- or semicolon-separated), an array of addresses, or `{ label: address }`, whose labels become the output keys |
+| Schema | `msg` / `flow` / `global` | The struct schema, as an array or a JSON string (struct mode only) |
 | `msg.payload` | any | Output: read value(s) |
 
 **Output modes:**
@@ -123,11 +124,12 @@ If some addresses in a read fail, the rest are still sent and the failed ones ar
 
 #### s7-write
 
-| Property | Type | Description |
+The node writes to the address and with the schema set in it; nothing else in the message changes them. To take them from the message, set the address type or **Schema** to `msg` (or `flow`, `global`, `env`) and name the property:
+
+| Setting / property | Type | Description |
 |----------|------|-------------|
-| `msg.topic` | string | Overrides configured address |
-| `msg.mode` | string | Overrides write mode (`single`, `multi`, `struct`) |
-| `msg.schema` | object[] | Overrides struct schema (struct mode only) |
+| Address | `str` / `msg` / `flow` / `global` / `env` | One address string (single and struct modes), for example `msg.topic` |
+| Schema | `msg` / `flow` / `global` | The struct schema, as an array or a JSON string (struct mode only) |
 | `msg.payload` | any | Value to write (type must match address data type). For an address with a length (`DB1,INT20.3`), an array of that many values, or a `Buffer` for a byte array |
 
 On success, the input message is passed through to the output.
