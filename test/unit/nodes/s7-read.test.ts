@@ -19,8 +19,15 @@ describe('s7-read node', () => {
       }),
       getNode: jest.fn(),
     },
+    util: {
+      // msg and env, as Node-RED's evaluateNodeProperty resolves them
+      evaluateNodeProperty: jest.fn((value: string, type: string, _n: unknown, msg: Record<string, unknown>, cb: Function) => {
+        if (type === 'msg') cb(null, value.split('.').reduce((o: unknown, k) => (o as Record<string, unknown>)?.[k], msg));
+        else if (type === 'env') cb(null, process.env[value]);
+        else cb(new Error(`unsupported type ${type}`));
+      }),
+    },
   };
-
   function createServerNode() {
     mockBackend = new MockBackend();
     connManager = new ConnectionManager(mockBackend, {
@@ -145,29 +152,63 @@ describe('s7-read node', () => {
       expect(done).toHaveBeenCalledWith();
     });
 
-    it('uses msg.topic as address when provided', async () => {
+    it('ignores msg.topic: the configured addresses are read', async () => {
       mockBackend.readValues = { item_0: 100 };
 
       const node = createNodeContext();
       constructorFn.call(node, {
-        id: 'read1',
-        type: 's7-read',
-        server: 'config1',
-        address: 'DB1,REAL0',
-        outputMode: 'single',
-        topic: '',
+        id: 'read1', type: 's7-read', server: 'config1', address: 'DB1,REAL0', outputMode: 'single', topic: '',
       });
 
-      const msg = { _msgid: '123', payload: null, topic: 'DB1,INT0' };
+      const done = jest.fn();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (node as any).listeners('input')[0]({ _msgid: '123', payload: null, topic: 'DB1,INT0' }, jest.fn(), done);
+
+      expect(mockBackend.readCalls[0][0].address).toMatchObject({ dataType: 'REAL', offset: 0 });
+      expect(done).toHaveBeenCalledWith();
+    });
+
+    it('reads the addresses from a msg property when told to', async () => {
+      mockBackend.readValues = { item_0: 1, item_1: 2 };
+
+      const node = createNodeContext();
+      constructorFn.call(node, {
+        id: 'read1', type: 's7-read', server: 'config1', address: 'DB1,REAL0', outputMode: 'object',
+        addressType: 'msg', addressProp: 'request.addresses',
+      });
+
       const send = jest.fn();
       const done = jest.fn();
-
+      const msg = { _msgid: '1', request: { addresses: { speed: 'DB1,INT0', count: 'DB1,INT2' } } };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const inputHandler = (node as any).listeners('input')[0];
-      await inputHandler(msg, send, done);
+      await (node as any).listeners('input')[0](msg, send, done);
 
-      expect(send).toHaveBeenCalled();
+      expect(mockBackend.readCalls[0].map((i: { address: { offset: number } }) => i.address.offset)).toEqual([0, 2]);
+      expect(send).toHaveBeenCalledWith(expect.objectContaining({ payload: { speed: 1, count: 2 } }));
       expect(done).toHaveBeenCalledWith();
+    });
+
+    it('takes an array or a string of addresses from msg, and refuses anything else', async () => {
+      const run = async (value: unknown) => {
+        const node = createNodeContext();
+        constructorFn.call(node, {
+          id: 'read1', type: 's7-read', server: 'config1', address: '', outputMode: 'object',
+          addressType: 'msg', addressProp: 'addrs',
+        });
+        const done = jest.fn();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (node as any).listeners('input')[0]({ _msgid: '1', addrs: value }, jest.fn(), done);
+        return done;
+      };
+      await run(['DB1,INT0', 'DB1,INT2']);
+      expect(mockBackend.readCalls[mockBackend.readCalls.length - 1]).toHaveLength(2);
+      await run('DB1,INT0 DB1,INT2; DB1,INT4');
+      expect(mockBackend.readCalls[mockBackend.readCalls.length - 1]).toHaveLength(3);
+      const done = await run(42);
+      expect(done.mock.calls[0][0].message).toBe(
+        'msg.addrs must be an address string, an array of addresses or an object of { label: address } (got number)',
+      );
+      expect((await run(undefined)).mock.calls[0][0].message).toBe('No address in msg.addrs');
     });
 
     it('reads multiple addresses and returns object payload', async () => {
@@ -430,7 +471,7 @@ describe('s7-read node', () => {
         expect(done).toHaveBeenCalledWith();
       });
 
-      it('uses msg.topic as address override', async () => {
+      it('reads the address from msg.topic when told to', async () => {
         const testBuffer = Buffer.from([0x01, 0x02]);
         mockBackend.rawAreaData.set('132:2:0:2', testBuffer);
 
@@ -443,6 +484,8 @@ describe('s7-read node', () => {
           outputMode: 'buffer',
           topic: '',
           schema: '[]',
+          addressType: 'msg',
+          addressProp: 'topic',
         });
 
         const msg = { _msgid: '123', payload: null, topic: 'DB2,BYTE0.0.2' };
@@ -565,7 +608,7 @@ describe('s7-read node', () => {
         expect(done).toHaveBeenCalledWith();
       });
 
-      it('accepts msg.schema as runtime override', async () => {
+      it('takes the schema from msg.schema when told to', async () => {
         const buf = Buffer.alloc(4);
         buf.writeFloatBE(99.9, 0);
         mockBackend.rawAreaData.set('132:1:0:4', buf);
@@ -579,6 +622,8 @@ describe('s7-read node', () => {
           outputMode: 'struct',
           topic: '',
           schema: '[]',
+          schemaType: 'msg',
+          schemaProp: 'schema',
         });
 
         const msg = {
@@ -597,6 +642,20 @@ describe('s7-read node', () => {
         const payload = send.mock.calls[0][0].payload;
         expect(payload.value).toBeCloseTo(99.9);
         expect(done).toHaveBeenCalledWith();
+      });
+
+      it('ignores msg.schema and msg.outputMode by default', async () => {
+        mockBackend.rawAreaData.set('132:1:0:4', Buffer.alloc(4));
+        const node = createNodeContext();
+        constructorFn.call(node, {
+          id: 'read1', type: 's7-read', server: 'config1', address: 'DB1,BYTE0', outputMode: 'struct',
+          schema: JSON.stringify([{ name: 'configured', type: 'REAL', offset: 0 }]),
+        });
+        const send = jest.fn();
+        const msg = { _msgid: '1', schema: [{ name: 'fromMsg', type: 'REAL', offset: 0 }], outputMode: 'buffer' };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (node as any).listeners('input')[0](msg, send, jest.fn());
+        expect(Object.keys(send.mock.calls[0][0].payload)).toEqual(['configured']);
       });
 
       it('calls done with error when no schema specified', async () => {
