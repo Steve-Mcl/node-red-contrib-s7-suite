@@ -1,8 +1,9 @@
 import { IS7Backend } from './s7-backend.interface';
 import { S7ConnectionConfig } from '../types/s7-connection';
-import { S7ReadItem, S7ReadResult, S7WriteItem } from '../types/s7-address';
+import { S7ReadItem, S7ReadResult, S7WriteItem, AREA_CODE_MAP } from '../types/s7-address';
 import { S7BlockInfo, S7BlockList, S7BlockType } from '../types/s7-browse';
 import { toNodes7Address } from '../core/address-parser';
+import { stringWrite } from '../core/data-converter';
 import { S7Error, S7ErrorCode, describeError, describeRawRequest } from '../utils/error-codes';
 
 const BAD_QUALITY_HINT = ' (check that the address exists and is within the area or DB size)';
@@ -166,14 +167,24 @@ export class NodeS7Backend implements IS7Backend {
   async write(items: S7WriteItem[]): Promise<void> {
     this.assertConnected('write');
 
+    // Strings are sized from their header first, so do that before this write's items are added
+    const prepared: Array<{ name: string; value: unknown }> = [];
+    for (const item of items) {
+      const type = item.address.dataType;
+      if (type === 'STRING' || type === 'WSTRING') {
+        prepared.push(await this.prepareStringWrite(item));
+      } else {
+        prepared.push({ name: item.nodes7Address ?? toNodes7Address(item.address), value: item.value });
+      }
+    }
+
     const names: string[] = [];
     const values: unknown[] = [];
 
-    for (const item of items) {
-      const addr = item.nodes7Address ?? toNodes7Address(item.address);
-      this.conn.addItems(addr);
-      names.push(addr);
-      values.push(item.value);
+    for (const { name, value } of prepared) {
+      this.conn.addItems(name);
+      names.push(name);
+      values.push(value);
     }
 
     const removeAll = (): void => {
@@ -199,6 +210,28 @@ export class NodeS7Backend implements IS7Backend {
         throw e;
       }
     });
+  }
+
+  /**
+   * Turns a STRING/WSTRING write into a plain BYTE write of just the string's current length and
+   * characters, using the same rules as the snap7 backend (see stringWrite). nodes7's own string
+   * writes pad to the full length, need the length in the address, and don't support WSTRING.
+   */
+  private async prepareStringWrite(item: S7WriteItem): Promise<{ name: string; value: unknown }> {
+    const addr = item.address;
+    const dataType = addr.dataType as 'STRING' | 'WSTRING';
+    const areaCode = AREA_CODE_MAP[addr.area];
+    if (areaCode === undefined) {
+      throw new S7Error(S7ErrorCode.WRITE_FAILED, `Unsupported area: ${addr.area}`);
+    }
+    const header = await this.readRawArea(areaCode, addr.dbNumber, addr.offset, dataType === 'WSTRING' ? 4 : 2);
+    const where = `${addr.area === 'DB' ? `DB${addr.dbNumber}` : addr.area} offset ${addr.offset}`;
+    const { start, bytes } = stringWrite(dataType, item.value, header, addr.stringLength, where);
+
+    const at = addr.offset + start;
+    const name = addr.area === 'DB' ? `DB${addr.dbNumber},BYTE${at}` : `${addr.area}B${at}`;
+    // A single byte (an empty string) is a plain BYTE; nodes7 takes anything longer as an array
+    return bytes.length === 1 ? { name, value: bytes[0] } : { name: `${name}.${bytes.length}`, value: [...bytes] };
   }
 
   async readRawArea(area: number, dbNumber: number, start: number, length: number): Promise<Buffer> {

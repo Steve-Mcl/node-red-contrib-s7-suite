@@ -2,7 +2,7 @@ import { IS7Backend } from './s7-backend.interface';
 import { S7ConnectionConfig } from '../types/s7-connection';
 import { S7ReadItem, S7ReadResult, S7WriteItem, AREA_CODE_MAP } from '../types/s7-address';
 import { S7BlockInfo, S7BlockList, S7BlockType } from '../types/s7-browse';
-import { byteLength, readValue, writeValue } from '../core/data-converter';
+import { byteLength, readValue, stringWrite, writeValue } from '../core/data-converter';
 import { S7Error, S7ErrorCode, describeError, describeRawRequest } from '../utils/error-codes';
 
 const BLOCK_TYPE_MAP: Record<S7BlockType, number> = {
@@ -222,6 +222,12 @@ export class Snap7Backend implements IS7Backend {
         const buf = await this.readRawArea(areaCode, addr.dbNumber, addr.offset, 1);
         writeValue(buf, 0, 'BOOL', item.value, addr.bitOffset);
         await this.writeRawArea(areaCode, addr.dbNumber, addr.offset, 1, buf);
+      } else if (addr.dataType === 'STRING' || addr.dataType === 'WSTRING') {
+        // Size the write from the string's header in the PLC, so nothing past the string is touched
+        const header = await this.readRawArea(areaCode, addr.dbNumber, addr.offset, addr.dataType === 'WSTRING' ? 4 : 2);
+        const where = `${addr.area === 'DB' ? `DB${addr.dbNumber}` : addr.area} offset ${addr.offset}`;
+        const { start, bytes } = stringWrite(addr.dataType, item.value, header, addr.stringLength, where);
+        await this.writeRawArea(areaCode, addr.dbNumber, addr.offset + start, bytes.length, bytes);
       } else {
         const buf = Buffer.alloc(len);
         writeValue(buf, 0, addr.dataType, item.value, addr.bitOffset);

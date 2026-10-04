@@ -1,4 +1,4 @@
-import { byteLength, readValue, writeValue } from '../../../src/core/data-converter';
+import { byteLength, readValue, stringWrite, writeValue } from '../../../src/core/data-converter';
 import { S7Error } from '../../../src/utils/error-codes';
 
 describe('data-converter', () => {
@@ -478,6 +478,69 @@ describe('data-converter', () => {
     it('throws S7Error on buffer too small for WSTRING write', () => {
       const buf = Buffer.alloc(2); // need at least 4 for WSTRING header
       expect(() => writeValue(buf, 0, 'WSTRING', 'test')).toThrow(S7Error);
+    });
+  });
+
+  describe('stringWrite', () => {
+    it('writes only the current length and characters when the STRING header is set', () => {
+      const { start, bytes } = stringWrite('STRING', 'hello world', Buffer.from([20, 3]), 20, 'DB1 offset 50');
+      expect(start).toBe(1); // the max-length byte is left alone
+      expect(bytes.length).toBe(12);
+      expect(bytes[0]).toBe(11);
+      expect(bytes.toString('ascii', 1)).toBe('hello world');
+    });
+
+    it('uses the STRING header max when the address gives no length', () => {
+      const { start, bytes } = stringWrite('STRING', 'abc', Buffer.from([10, 0]), undefined, 'DB1 offset 0');
+      expect(start).toBe(1);
+      expect([...bytes]).toEqual([3, 0x61, 0x62, 0x63]);
+    });
+
+    it('writes the whole header when the STRING header is empty', () => {
+      const { start, bytes } = stringWrite('STRING', 'ab', Buffer.from([0, 0]), 20, 'DB1 offset 0');
+      expect(start).toBe(0);
+      expect([...bytes]).toEqual([20, 2, 0x61, 0x62]);
+    });
+
+    it('rejects a STRING when neither the header nor the address gives a length', () => {
+      expect(() => stringWrite('STRING', 'ab', Buffer.from([0, 0]), undefined, 'DB1 offset 0'))
+        .toThrow(/STRING at DB1 offset 0 has an empty header/);
+    });
+
+    it('rejects a value longer than the address length', () => {
+      expect(() => stringWrite('STRING', 'hello world', Buffer.from([254, 0]), 5, 'DB1 offset 50'))
+        .toThrow('STRING at DB1 offset 50 holds 5 characters; the value has 11');
+    });
+
+    it('trusts the PLC header when it is smaller than the address length', () => {
+      expect(() => stringWrite('STRING', 'hello world', Buffer.from([10, 0]), 20, 'DB1 offset 50'))
+        .toThrow('holds 10 characters');
+    });
+
+    it('allows an empty string', () => {
+      const { start, bytes } = stringWrite('STRING', '', Buffer.from([20, 5]), 20, 'DB1 offset 0');
+      expect(start).toBe(1);
+      expect([...bytes]).toEqual([0]);
+    });
+
+    it('writes only the current length and characters when the WSTRING header is set', () => {
+      const header = Buffer.from([0, 10, 0, 0]);
+      const { start, bytes } = stringWrite('WSTRING', 'Hi', header, undefined, 'DB1 offset 0');
+      expect(start).toBe(2);
+      expect([...bytes]).toEqual([0, 2, 0, 0x48, 0, 0x69]);
+    });
+
+    it('writes the whole header when the WSTRING header is empty', () => {
+      const { start, bytes } = stringWrite('WSTRING', 'Hi', Buffer.alloc(4), 300, 'DB1 offset 0');
+      expect(start).toBe(0);
+      expect(bytes.readUInt16BE(0)).toBe(300);
+      expect(bytes.readUInt16BE(2)).toBe(2);
+      expect(bytes.length).toBe(8);
+    });
+
+    it('rejects a WSTRING longer than its header max', () => {
+      expect(() => stringWrite('WSTRING', 'abc', Buffer.from([0, 2, 0, 0]), undefined, 'DB1 offset 0'))
+        .toThrow('WSTRING at DB1 offset 0 holds 2 characters; the value has 3');
     });
   });
 });

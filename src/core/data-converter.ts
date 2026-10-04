@@ -144,6 +144,56 @@ export function readValue(buffer: Buffer, offset: number, dataType: S7DataType, 
   }
 }
 
+/**
+ * Works out what to write for a STRING or WSTRING so that only the string itself changes: its
+ * current length and characters. Nothing past the string's declared size is touched, and its
+ * declared max length is only written when the header is still empty (all zero).
+ *
+ * @param header   the string's header as it is in the PLC now (2 bytes for STRING, 4 for WSTRING)
+ * @param declared max length given in the address (DB1,STRING50.20), if any
+ * @param where    where the string is, for error messages (e.g. "DB1 offset 50")
+ * @returns the offset to start writing at, relative to the string, and the bytes to write
+ */
+export function stringWrite(
+  dataType: 'STRING' | 'WSTRING',
+  value: unknown,
+  header: Buffer,
+  declared: number | undefined,
+  where: string,
+): { start: number; bytes: Buffer } {
+  const wide = dataType === 'WSTRING';
+  const headerMax = wide ? header.readUInt16BE(0) : header.readUInt8(0);
+  // Trust the smaller of the PLC's declared size and the address's, never more
+  const maxLen = headerMax > 0 ? Math.min(headerMax, declared ?? headerMax) : declared;
+  if (!maxLen) {
+    throw new S7Error(
+      S7ErrorCode.WRITE_FAILED,
+      `${dataType} at ${where} has an empty header and the address gives no length, so its size is unknown (add one to the address, e.g. DB1,${dataType}50.20)`,
+    );
+  }
+  const text = String(value);
+  if (text.length > maxLen) {
+    throw new S7Error(
+      S7ErrorCode.WRITE_FAILED,
+      `${dataType} at ${where} holds ${maxLen} characters; the value has ${text.length}`,
+    );
+  }
+
+  const charSize = wide ? 2 : 1;
+  const lenSize = wide ? 2 : 1;
+  const writeMax = headerMax === 0; // initialise an empty header, otherwise leave it alone
+  const bytes = Buffer.alloc((writeMax ? lenSize : 0) + lenSize + text.length * charSize);
+  let pos = 0;
+  if (writeMax) {
+    pos = wide ? bytes.writeUInt16BE(maxLen, pos) : bytes.writeUInt8(maxLen, pos);
+  }
+  pos = wide ? bytes.writeUInt16BE(text.length, pos) : bytes.writeUInt8(text.length, pos);
+  for (let i = 0; i < text.length; i++) {
+    pos = wide ? bytes.writeUInt16BE(text.charCodeAt(i), pos) : bytes.writeUInt8(text.charCodeAt(i) & 0xff, pos);
+  }
+  return { start: writeMax ? 0 : lenSize, bytes };
+}
+
 /** Writes a typed value into a buffer at the given offset. */
 export function writeValue(buffer: Buffer, offset: number, dataType: S7DataType, value: unknown, bitOffset = 0): void {
   const required = dataType === 'STRING' ? 2 : byteLength(dataType);

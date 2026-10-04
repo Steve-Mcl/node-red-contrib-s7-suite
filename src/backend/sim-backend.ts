@@ -2,7 +2,7 @@ import { IS7Backend } from './s7-backend.interface';
 import { S7ConnectionConfig } from '../types/s7-connection';
 import { S7ReadItem, S7ReadResult, S7WriteItem } from '../types/s7-address';
 import { S7BlockInfo, S7BlockList, S7BlockType } from '../types/s7-browse';
-import { byteLength, readValue, writeValue } from '../core/data-converter';
+import { byteLength, readValue, stringWrite, writeValue } from '../core/data-converter';
 
 export class SimBackend implements IS7Backend {
   private connected = false;
@@ -107,7 +107,22 @@ export class SimBackend implements IS7Backend {
         buf = this.memory.get(key)!;
       }
 
-      writeValue(buf, addr.offset, addr.dataType, item.value, addr.bitOffset);
+      if (addr.dataType === 'STRING' || addr.dataType === 'WSTRING') {
+        // Same rules as a real PLC (see Snap7Backend.write): only the string itself changes
+        const headerLen = addr.dataType === 'WSTRING' ? 4 : 2;
+        if (addr.offset + headerLen > buf.length) {
+          throw new Error(`Offset ${addr.offset} out of range (area size: ${buf.length})`);
+        }
+        const header = buf.subarray(addr.offset, addr.offset + headerLen);
+        const where = `${key} offset ${addr.offset}`;
+        const { start, bytes } = stringWrite(addr.dataType, item.value, header, addr.stringLength, where);
+        if (addr.offset + start + bytes.length > buf.length) {
+          throw new Error(`${addr.dataType} at ${where} runs past the end of the area (area size: ${buf.length})`);
+        }
+        bytes.copy(buf, addr.offset + start);
+      } else {
+        writeValue(buf, addr.offset, addr.dataType, item.value, addr.bitOffset);
+      }
     }
   }
 
