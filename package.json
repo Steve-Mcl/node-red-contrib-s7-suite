@@ -31,9 +31,9 @@
     "copy-html": "copyfiles -u 1 \"src/nodes/**/*.html\" dist/",
     "copy-icons": "copyfiles -f \"src/icons/*\" dist/nodes/s7-config/icons && copyfiles -f \"src/icons/*\" dist/nodes/s7-read/icons && copyfiles -f \"src/icons/*\" dist/nodes/s7-write/icons && copyfiles -f \"src/icons/*\" dist/nodes/s7-trigger/icons && copyfiles -f \"src/icons/*\" dist/nodes/s7-browse/icons && copyfiles -f \"src/icons/*\" dist/nodes/s7-control/icons",
     "test": "jest --coverage",
-    "lint": "eslint 'src/**/*.ts' 'test/**/*.ts'",
-    "lint:fix": "eslint 'src/**/*.ts' 'test/**/*.ts' --fix",
-    "format": "prettier --write 'src/**/*.ts' 'test/**/*.ts'",
+    "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
+    "lint:fix": "eslint \"src/**/*.ts\" \"test/**/*.ts\" --fix",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "prepublishOnly": "npm run build"
   },
   "node-red": {
