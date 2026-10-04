@@ -8,8 +8,16 @@ export interface IS7Backend {
   connect(config: S7ConnectionConfig): Promise<void>;
   /** Disconnects from the PLC. */
   disconnect(): Promise<void>;
-  /** Returns whether the backend is currently connected. */
+  /**
+   * Returns whether the backend is currently connected. Should turn false as soon as the
+   * backend knows the link is gone, not only after disconnect().
+   */
   isConnected(): boolean;
+  /**
+   * Optional cheap round trip used while idle to confirm the PLC still answers. Rejects with a
+   * DISCONNECTED S7Error when the link is gone.
+   */
+  ping?(): Promise<void>;
   /** Reads values for the specified S7 items. */
   read(items: S7ReadItem[]): Promise<S7ReadResult[]>;
   /** Writes values for the specified S7 items. */

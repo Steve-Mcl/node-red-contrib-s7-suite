@@ -22,11 +22,21 @@ function failureDetail(err: unknown, addrs: string[], values?: Record<string, un
 
 const causeOf = (err: unknown): Error | undefined => (err instanceof Error ? err : undefined);
 
+/**
+ * nodes7's isoConnectionState when the link is up. It drops to 0 as soon as the socket closes
+ * (PLC restart, cable reset by peer), with no request needed, and stays below 4 while nodes7
+ * retries on its own.
+ */
+const ISO_CONNECTED = 4;
+
 export class NodeS7Backend implements IS7Backend {
   private conn: any = null; // eslint-disable-line @typescript-eslint/no-explicit-any
   private connected = false;
 
   async connect(config: S7ConnectionConfig): Promise<void> {
+    // A reconnect must not leave the previous nodes7 instance (and its retry timers) running
+    await this.disconnect();
+
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const nodes7 = require('nodes7');
     // nodeS7 defaults silentMode to false, which logs every read/poll cycle
@@ -77,13 +87,29 @@ export class NodeS7Backend implements IS7Backend {
   }
 
   isConnected(): boolean {
-    return this.connected;
+    return this.connected && this.conn !== null && this.conn.isoConnectionState === ISO_CONNECTED;
   }
 
-  async read(items: S7ReadItem[]): Promise<S7ReadResult[]> {
+  /** True when we hold a connection but nodes7 reports the link as down. */
+  private linkLost(): boolean {
+    return this.conn !== null && this.conn.isoConnectionState !== ISO_CONNECTED;
+  }
+
+  private lostError(op: string): S7Error {
+    return new S7Error(S7ErrorCode.DISCONNECTED, `nodes7 ${op} failed: connection to the PLC was lost`);
+  }
+
+  private assertConnected(op: string): void {
     if (!this.conn || !this.connected) {
       throw new S7Error(S7ErrorCode.DISCONNECTED, 'Not connected');
     }
+    if (this.linkLost()) {
+      throw this.lostError(op);
+    }
+  }
+
+  async read(items: S7ReadItem[]): Promise<S7ReadResult[]> {
+    this.assertConnected('read');
 
     const addrList = items.map((i) => i.nodes7Address ?? toNodes7Address(i.address));
     for (const addr of addrList) {
@@ -101,6 +127,10 @@ export class NodeS7Backend implements IS7Backend {
         this.conn.readAllItems((err: unknown, values: Record<string, unknown>) => {
           removeAll();
 
+          if (err && this.linkLost()) {
+            reject(this.lostError('read'));
+            return;
+          }
           if (err) {
             reject(new S7Error(
               S7ErrorCode.READ_FAILED,
@@ -134,9 +164,7 @@ export class NodeS7Backend implements IS7Backend {
   }
 
   async write(items: S7WriteItem[]): Promise<void> {
-    if (!this.conn || !this.connected) {
-      throw new S7Error(S7ErrorCode.DISCONNECTED, 'Not connected');
-    }
+    this.assertConnected('write');
 
     const names: string[] = [];
     const values: unknown[] = [];
@@ -158,7 +186,9 @@ export class NodeS7Backend implements IS7Backend {
       try {
         this.conn.writeItems(names, values, (err: unknown) => {
           removeAll();
-          if (err) {
+          if (err && this.linkLost()) {
+            reject(this.lostError('write'));
+          } else if (err) {
             reject(new S7Error(S7ErrorCode.WRITE_FAILED, `nodes7 write failed: ${failureDetail(err, names)}`, causeOf(err)));
           } else {
             resolve();
@@ -173,9 +203,7 @@ export class NodeS7Backend implements IS7Backend {
 
   async readRawArea(area: number, dbNumber: number, start: number, length: number): Promise<Buffer> {
     // nodes7 doesn't have a direct raw area read, so we construct a BYTE read
-    if (!this.conn || !this.connected) {
-      throw new S7Error(S7ErrorCode.DISCONNECTED, 'Not connected');
-    }
+    this.assertConnected('read');
 
     const areaMap: Record<number, string> = {
       0x81: 'I',
@@ -201,6 +229,10 @@ export class NodeS7Backend implements IS7Backend {
     return new Promise<Buffer>((resolve, reject) => {
       this.conn.readAllItems((err: unknown, values: Record<string, unknown>) => {
         this.conn.removeItems(addr);
+        if (err && this.linkLost()) {
+          reject(this.lostError('read'));
+          return;
+        }
         if (err) {
           // Describe the request rather than the internal nodes7 address (DB1,BYTE200.8), which
           // the user never typed: struct, buffer and bits modes all read through here.

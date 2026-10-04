@@ -7,9 +7,12 @@ const mockAddItems = jest.fn();
 const mockRemoveItems = jest.fn();
 const mockReadAllItems = jest.fn();
 const mockWriteItems = jest.fn();
+// nodes7's isoConnectionState: 4 = link up, lower = down/reconnecting
+const mockIso = { state: 4 };
 
 jest.mock('nodes7', () => {
   return jest.fn().mockImplementation(() => ({
+    get isoConnectionState() { return mockIso.state; },
     initiateConnection: mockInitiateConnection,
     dropConnection: mockDropConnection,
     addItems: mockAddItems,
@@ -28,6 +31,7 @@ describe('NodeS7Backend', () => {
   beforeEach(() => {
     backend = new NodeS7Backend();
     jest.clearAllMocks();
+    mockIso.state = 4;
   });
 
   describe('connect', () => {
@@ -114,6 +118,62 @@ describe('NodeS7Backend', () => {
         localTSAP: 0x0100,
         remoteTSAP: 0x0200,
       });
+    });
+  });
+
+  describe('connection loss', () => {
+    const cfg = {
+      host: '192.168.1.100', port: 102, rack: 0, slot: 1, plcType: 'S7-1200' as const, backend: 'nodes7' as const,
+    };
+    const item = {
+      name: 'temp',
+      address: { area: 'DB' as const, dbNumber: 1, dataType: 'REAL' as const, offset: 0, bitOffset: 0 },
+      nodes7Address: 'DB1,REAL0',
+    };
+
+    beforeEach(async () => {
+      mockInitiateConnection.mockImplementation((_p: unknown, cb: Function) => cb());
+      await backend.connect(cfg);
+    });
+
+    it('reports not connected as soon as nodes7 drops isoConnectionState', () => {
+      expect(backend.isConnected()).toBe(true);
+      mockIso.state = 0; // socket closed by the PLC
+      expect(backend.isConnected()).toBe(false);
+    });
+
+    it('rejects a read with DISCONNECTED when the link fails during the read', async () => {
+      mockReadAllItems.mockImplementation((cb: Function) => {
+        mockIso.state = 1; // nodes7 is retrying
+        cb(true, { 'DB1,REAL0': 'BAD 255' });
+      });
+
+      await expect(backend.read([item])).rejects.toMatchObject({
+        code: 'DISCONNECTED',
+        message: 'nodes7 read failed: connection to the PLC was lost',
+      });
+    });
+
+    it('still reports a bad address as READ_FAILED while the link is up', async () => {
+      mockReadAllItems.mockImplementation((cb: Function) => cb(true, { 'DB1,REAL0': 'BAD 255' }));
+
+      await expect(backend.read([item])).rejects.toMatchObject({ code: 'READ_FAILED' });
+    });
+
+    it('fails fast without asking nodes7 when the link is already down', async () => {
+      mockIso.state = 0;
+
+      await expect(backend.write([{ ...item, value: 1 }])).rejects.toMatchObject({ code: 'DISCONNECTED' });
+      await expect(backend.readRawArea(0x84, 1, 0, 4)).rejects.toMatchObject({ code: 'DISCONNECTED' });
+      expect(mockWriteItems).not.toHaveBeenCalled();
+      expect(mockReadAllItems).not.toHaveBeenCalled();
+    });
+
+    it('drops the previous nodes7 connection when reconnecting', async () => {
+      await backend.connect(cfg);
+
+      expect(mockDropConnection).toHaveBeenCalledTimes(1);
+      expect(mockNodes7).toHaveBeenCalledTimes(2);
     });
   });
 

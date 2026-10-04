@@ -124,6 +124,106 @@ describe('ConnectionManager - extra coverage', () => {
     expect(manager.getState()).toBe('connected');
   });
 
+  it('always asks the backend to clean up on disconnect, even after the link was lost', async () => {
+    await manager.connect();
+    backend.connected = false; // backend noticed the link went down
+    const spy = jest.spyOn(backend, 'disconnect');
+    await manager.disconnect();
+    expect(spy).toHaveBeenCalled();
+  });
+
+  describe('idle health check', () => {
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    let hcManager: ConnectionManager;
+    let states: string[];
+
+    const make = (healthCheckInterval: number) => {
+      hcManager = new ConnectionManager(backend, { ...config, healthCheckInterval });
+      states = [];
+      hcManager.on('stateChanged', ({ newState }) => states.push(newState));
+      return hcManager;
+    };
+
+    afterEach(async () => {
+      await hcManager?.disconnect();
+    });
+
+    it('notices a lost link while idle and reconnects', async () => {
+      await make(30).connect();
+      backend.connected = false; // e.g. nodes7 saw the socket close
+
+      await sleep(120);
+      expect(states).toContain('reconnecting');
+
+      // reconnectInterval is 50ms in this suite; MockBackend.connect() brings it back
+      await sleep(120);
+      expect(hcManager.getState()).toBe('connected');
+      expect(backend.connectCalls.length).toBe(2);
+    });
+
+    it('pings an idle backend and reconnects when the ping reports a lost link', async () => {
+      let pings = 0;
+      backend.ping = async () => {
+        pings++;
+        throw new S7Error(S7ErrorCode.DISCONNECTED, 'link gone');
+      };
+
+      await make(30).connect();
+      await sleep(120);
+
+      expect(pings).toBeGreaterThan(0);
+      expect(states).toContain('reconnecting');
+    });
+
+    it('ignores a ping failure that is not a lost link', async () => {
+      backend.ping = async () => {
+        throw new S7Error(S7ErrorCode.READ_FAILED, 'CPU does not support status requests');
+      };
+
+      await make(30).connect();
+      await sleep(120);
+
+      expect(states).not.toContain('reconnecting');
+      expect(hcManager.getState()).toBe('connected');
+    });
+
+    it('does not check while requests keep the link busy', async () => {
+      const ping = jest.fn(async () => undefined);
+      backend.ping = ping;
+      await make(40).connect();
+
+      const item = {
+        name: 'x',
+        address: { area: 'DB' as const, dbNumber: 1, dataType: 'INT' as const, offset: 0, bitOffset: 0 },
+      };
+      for (let i = 0; i < 6; i++) {
+        await hcManager.read([item]);
+        await sleep(15);
+      }
+
+      expect(ping).not.toHaveBeenCalled();
+    });
+
+    it('notices a lost link on the next tick even right after a request', async () => {
+      await make(40).connect();
+      await hcManager.read([{
+        name: 'x',
+        address: { area: 'DB' as const, dbNumber: 1, dataType: 'INT' as const, offset: 0, bitOffset: 0 },
+      }]);
+      backend.connected = false;
+
+      await sleep(60); // a single tick, not two
+      expect(states).toContain('reconnecting');
+    });
+
+    it('can be disabled with healthCheckInterval 0', async () => {
+      await make(0).connect();
+      backend.connected = false;
+      await sleep(100);
+      expect(hcManager.getState()).toBe('connected');
+    });
+  });
+
   it('handles queue full scenario', async () => {
     await manager.connect();
 

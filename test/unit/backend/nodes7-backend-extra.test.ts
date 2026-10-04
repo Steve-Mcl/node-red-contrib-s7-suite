@@ -9,6 +9,7 @@ const mockWriteItems = jest.fn();
 
 jest.mock('nodes7', () => {
   return jest.fn().mockImplementation(() => ({
+    isoConnectionState: 4,
     initiateConnection: mockInitiateConnection,
     dropConnection: mockDropConnection,
     addItems: mockAddItems,

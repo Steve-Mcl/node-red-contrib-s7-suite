@@ -20,6 +20,8 @@ export class MockBackend implements IS7Backend {
   };
   blockNumbers: Record<string, number[]> = {};
   blockInfos: Map<string, S7BlockInfo> = new Map();
+  /** Optional IS7Backend.ping; tests assign it when they need one. */
+  ping?: () => Promise<void>;
 
   async connect(config: S7ConnectionConfig): Promise<void> {
     this.connectCalls.push(config);
