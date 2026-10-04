@@ -71,6 +71,24 @@ describe('SimBackend', () => {
     expect(results[0].value).toBeCloseTo(99.9, 1);
   });
 
+  it('writes and reads back a DTLZ as a Date', async () => {
+    const address = { area: 'DB' as const, dbNumber: 1, dataType: 'DTLZ' as const, offset: 40, bitOffset: 0 };
+    const when = new Date('2024-03-17T10:30:45.123Z');
+    await backend.write([{ name: 'd', address, value: when }]);
+    const results = await backend.read([{ name: 'd', address }]);
+    expect(results[0].value).toEqual(when);
+  });
+
+  it('returns LINT as the config asks', async () => {
+    const big = new SimBackend();
+    await big.connect({ ...config, int64As: 'bigint' });
+    const address = { area: 'DB' as const, dbNumber: 1, dataType: 'LINT' as const, offset: 56, bitOffset: 0 };
+    await big.write([{ name: 'l', address, value: '9007199254740993' }]);
+    expect((await big.read([{ name: 'l', address }]))[0].value).toBe(9007199254740993n);
+    expect((await backend.read([{ name: 'l', address }]))[0].value).toBe(0); // separate sim, default 'number'
+    await big.disconnect();
+  });
+
   it('writes and reads back INT', async () => {
     await backend.write([{
       name: 'count',

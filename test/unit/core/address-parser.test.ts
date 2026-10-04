@@ -129,6 +129,13 @@ describe('address-parser', () => {
       expect(() => parseAddress('DB1,WSTRING0.16382')).not.toThrow();
     });
 
+    it.each(['DT', 'DTZ', 'DTL', 'DTLZ'])('parses DB with %s type and passes it to nodes7 unchanged', (type) => {
+      const addr = parseAddress(`DB3,${type}16`);
+      expect(addr.dataType).toBe(type);
+      expect(addr.offset).toBe(16);
+      expect(toNodes7Address(addr)).toBe(`DB3,${type}16`);
+    });
+
     it('is case-insensitive', () => {
       const addr = parseAddress('db1,real0');
       expect(addr.area).toBe('DB');

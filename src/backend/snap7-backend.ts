@@ -2,7 +2,7 @@ import { IS7Backend } from './s7-backend.interface';
 import { S7ConnectionConfig } from '../types/s7-connection';
 import { S7ReadItem, S7ReadResult, S7WriteItem, AREA_CODE_MAP } from '../types/s7-address';
 import { S7BlockInfo, S7BlockList, S7BlockType } from '../types/s7-browse';
-import { byteLength, readValue, stringWrite, writeValue } from '../core/data-converter';
+import { byteLength, readValue, ReadOptions, stringWrite, writeValue } from '../core/data-converter';
 import { S7Error, S7ErrorCode, describeError, describeRawRequest } from '../utils/error-codes';
 
 const BLOCK_TYPE_MAP: Record<S7BlockType, number> = {
@@ -26,8 +26,10 @@ const LINK_ERROR_MASK = 0x000fffff;
 export class Snap7Backend implements IS7Backend {
   private client: any = null; // eslint-disable-line @typescript-eslint/no-explicit-any
   private connected = false;
+  private readOptions: ReadOptions = {};
 
   async connect(config: S7ConnectionConfig): Promise<void> {
+    this.readOptions = { int64: config.int64As };
     // snap7 never reconnects on its own; drop the old client before making a new one
     await this.disconnect();
 
@@ -170,11 +172,11 @@ export class Snap7Backend implements IS7Backend {
         if (addr.arrayLength) {
           const arr: unknown[] = [];
           for (let i = 0; i < addr.arrayLength; i++) {
-            arr.push(readValue(buffer, i * len, addr.dataType, addr.bitOffset));
+            arr.push(readValue(buffer, i * len, addr.dataType, addr.bitOffset, this.readOptions));
           }
           value = arr;
         } else {
-          value = readValue(buffer, 0, addr.dataType, addr.bitOffset);
+          value = readValue(buffer, 0, addr.dataType, addr.bitOffset, this.readOptions);
         }
 
         results.push({

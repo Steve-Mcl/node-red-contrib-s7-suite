@@ -466,6 +466,33 @@ describe('s7-write node', () => {
         expect(done).toHaveBeenCalledWith();
       });
 
+      it('accepts the wider types in a schema, like s7-read does', async () => {
+        mockBackend.rawAreaData.set('132:1:0:32', Buffer.alloc(32));
+        const node = createNodeContext();
+        constructorFn.call(node, {
+          id: 'write1',
+          type: 's7-write',
+          server: 'config1',
+          address: 'DB1,BYTE0',
+          mode: 'struct',
+          schema: JSON.stringify([
+            { name: 'stamp', type: 'DTLZ', offset: 0 },
+            { name: 'big', type: 'ULINT', offset: 12 },
+            { name: 'label', type: 'WSTRING', offset: 20, length: 4 },
+          ]),
+        });
+
+        const when = new Date('2024-03-17T10:30:45.123Z');
+        const msg = { _msgid: '123', payload: { stamp: when, big: 18446744073709551615n, label: 'Hi' } };
+        const done = jest.fn();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (node as any).listeners('input')[0](msg, jest.fn(), done);
+
+        expect(done).toHaveBeenCalledWith();
+        expect(mockBackend.writeCalls[0].map((i: { address: { dataType: string } }) => i.address.dataType))
+          .toEqual(['DTLZ', 'ULINT', 'WSTRING']);
+      });
+
       it('uses msg.topic as base address', async () => {
         // DB2 area code = 0x84 = 132, dbNumber = 2, offset = 0
         const buf = Buffer.alloc(6);

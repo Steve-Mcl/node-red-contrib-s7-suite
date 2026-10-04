@@ -7,6 +7,26 @@ describe('Poller', () => {
     if (poller) poller.stop();
   });
 
+  describe('change detection', () => {
+    // hasChanged() is private; call it directly rather than wait on timers
+    const changed = (p: Poller, oldValue: unknown, newValue: unknown): boolean =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (p as any).hasChanged({ lastValue: oldValue }, newValue);
+
+    it('compares dates by the time they hold, not by object', () => {
+      poller = new Poller({ interval: 50, edgeMode: 'any', deadband: 0 });
+      const t = Date.UTC(2024, 2, 17);
+      expect(changed(poller, new Date(t), new Date(t))).toBe(false);
+      expect(changed(poller, new Date(t), new Date(t + 1))).toBe(true);
+    });
+
+    it('applies the deadband to BigInt values', () => {
+      poller = new Poller({ interval: 50, edgeMode: 'any', deadband: 5 });
+      expect(changed(poller, 9007199254740993n, 9007199254740996n)).toBe(false);
+      expect(changed(poller, 9007199254740993n, 9007199254741000n)).toBe(true);
+    });
+  });
+
   it('emits changed on first read', (done) => {
     poller = new Poller({ interval: 50, edgeMode: 'any', deadband: 0 });
     poller.addItem('test');

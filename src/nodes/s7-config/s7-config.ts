@@ -5,7 +5,7 @@ import { PlcType, BackendType, PLC_DEFAULT_SLOTS } from '../../types/s7-connecti
 import { S7ConfigNode } from './s7-config-types';
 import { readValue } from '../../core/data-converter';
 import { parseAddress } from '../../core/address-parser';
-import { AREA_CODE_MAP } from '../../types/s7-address';
+import { AREA_CODE_MAP, Int64Mode } from '../../types/s7-address';
 import { parseCfg } from '../../core/cfg-parser';
 import { parseTiaXml } from '../../core/tia-xml-parser';
 
@@ -34,6 +34,7 @@ interface S7ConfigNodeDef extends NodeDef {
   requestTimeoutType?: 'num' | 'env';
   reconnectIntervalType?: 'num' | 'env';
   maxReconnectIntervalType?: 'num' | 'env';
+  int64As?: Int64Mode;
 }
 
 type StringField = 'host' | 'localTSAP' | 'remoteTSAP';
@@ -121,6 +122,7 @@ export = function (RED: NodeAPI): void {
       reconnectInterval: numField('reconnectInterval', 1000),
       maxReconnectInterval: numField('maxReconnectInterval', 30000),
       debug: config.debug === true,
+      int64As: config.int64As === 'bigint' || config.int64As === 'string' ? config.int64As : 'number',
     };
 
     const validationError = fieldErrors.length > 0 ? fieldErrors.join('; ') : validateConfig(this.s7Config);

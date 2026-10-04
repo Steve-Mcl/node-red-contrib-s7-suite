@@ -1,4 +1,6 @@
-export type PlcType = 'S7-200' | 'S7-300' | 'S7-400' | 'S7-1200' | 'S7-1500' | 'LOGO';
+import { Int64Mode } from './s7-address';
+
+export type PlcType ='S7-200' | 'S7-300' | 'S7-400' | 'S7-1200' | 'S7-1500' | 'LOGO';
 
 export type BackendType = 'nodes7' | 'snap7' | 'sim';
 
@@ -33,6 +35,8 @@ export interface S7ConnectionConfig {
    * Defaults to false so normal poll/read traffic is not logged to stdout.
    */
   debug?: boolean;
+  /** How LINT and ULINT values are returned. Defaults to 'number'. */
+  int64As?: Int64Mode;
 }
 
 export const PLC_DEFAULT_SLOTS: Record<PlcType, number> = {

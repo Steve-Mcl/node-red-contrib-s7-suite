@@ -1,5 +1,10 @@
-import { S7DataType } from '../types';
+import { Int64Mode, S7DataType } from '../types';
 import { S7Error, S7ErrorCode } from '../utils/error-codes';
+
+export interface ReadOptions {
+  /** How LINT and ULINT come back. Defaults to 'number'. */
+  int64?: Int64Mode;
+}
 
 /** S7 epoch: 1990-01-01 */
 const S7_DATE_EPOCH = new Date('1990-01-01T00:00:00Z');
@@ -14,6 +19,122 @@ function toBCD(val: number): number {
 /** Decode a BCD byte to decimal value */
 function fromBCD(bcd: number): number {
   return ((bcd >> 4) & 0x0f) * 10 + (bcd & 0x0f);
+}
+
+function int64Out(value: bigint, mode: Int64Mode | undefined): number | bigint | string {
+  if (mode === 'bigint') return value;
+  if (mode === 'string') return value.toString();
+  return Number(value);
+}
+
+/** Accepts a number, a BigInt or an integer string, so values past 2^53 can be written exactly. */
+function int64In(value: unknown, dataType: 'LINT' | 'ULINT'): bigint {
+  let v: bigint;
+  if (typeof value === 'bigint') {
+    v = value;
+  } else if (typeof value === 'string' && /^\s*-?\d+\s*$/.test(value)) {
+    v = BigInt(value.trim());
+  } else {
+    const n = Number(value);
+    if (!Number.isFinite(n)) {
+      throw new S7Error(S7ErrorCode.WRITE_FAILED, `${dataType} needs an integer; got ${String(value)}`);
+    }
+    v = BigInt(Math.round(n));
+  }
+  const [min, max] = dataType === 'LINT' ? [-(2n ** 63n), 2n ** 63n - 1n] : [0n, 2n ** 64n - 1n];
+  if (v < min || v > max) {
+    throw new S7Error(S7ErrorCode.WRITE_FAILED, `${v} is out of range for ${dataType} (${min} to ${max})`);
+  }
+  return v;
+}
+
+interface DateParts {
+  year: number; month: number; day: number; weekday: number;
+  hour: number; minute: number; second: number; ms: number;
+}
+
+/** Splits a date into its fields in UTC or in the server's local time. weekday is 1 (Sunday) to 7. */
+function dateParts(d: Date, utc: boolean): DateParts {
+  return utc
+    ? {
+      year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate(), weekday: d.getUTCDay() + 1,
+      hour: d.getUTCHours(), minute: d.getUTCMinutes(), second: d.getUTCSeconds(), ms: d.getUTCMilliseconds(),
+    }
+    : {
+      year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate(), weekday: d.getDay() + 1,
+      hour: d.getHours(), minute: d.getMinutes(), second: d.getSeconds(), ms: d.getMilliseconds(),
+    };
+}
+
+function fromParts(p: Omit<DateParts, 'weekday'>, utc: boolean): Date {
+  return utc
+    ? new Date(Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second, p.ms))
+    : new Date(p.year, p.month - 1, p.day, p.hour, p.minute, p.second, p.ms);
+}
+
+/** Accepts a Date, milliseconds since 1970, or anything Date can parse (e.g. an ISO string). */
+function dateIn(value: unknown, dataType: S7DataType, utc: boolean, minYear: number, maxYear: number): DateParts {
+  const d = value instanceof Date ? value : new Date(typeof value === 'number' ? value : String(value));
+  if (Number.isNaN(d.getTime())) {
+    throw new S7Error(
+      S7ErrorCode.WRITE_FAILED,
+      `${dataType} needs a date (a Date, an ISO string or milliseconds since 1970); got ${String(value)}`,
+    );
+  }
+  const p = dateParts(d, utc);
+  if (p.year < minYear || p.year > maxYear) {
+    throw new S7Error(S7ErrorCode.WRITE_FAILED, `${dataType} holds years ${minYear} to ${maxYear}; got ${p.year}`);
+  }
+  return p;
+}
+
+/** DATE_AND_TIME / DT: 8 BCD bytes, years 1990-2089, milliseconds, weekday in the last nibble. */
+function readDT(buffer: Buffer, offset: number): Omit<DateParts, 'weekday'> {
+  const yr = fromBCD(buffer.readUInt8(offset));
+  return {
+    year: yr < 90 ? 2000 + yr : 1900 + yr,
+    month: fromBCD(buffer.readUInt8(offset + 1)),
+    day: fromBCD(buffer.readUInt8(offset + 2)),
+    hour: fromBCD(buffer.readUInt8(offset + 3)),
+    minute: fromBCD(buffer.readUInt8(offset + 4)),
+    second: fromBCD(buffer.readUInt8(offset + 5)),
+    ms: fromBCD(buffer.readUInt8(offset + 6)) * 10 + ((buffer.readUInt8(offset + 7) >> 4) & 0x0f),
+  };
+}
+
+function writeDT(buffer: Buffer, offset: number, p: DateParts): void {
+  buffer.writeUInt8(toBCD(p.year % 100), offset);
+  buffer.writeUInt8(toBCD(p.month), offset + 1);
+  buffer.writeUInt8(toBCD(p.day), offset + 2);
+  buffer.writeUInt8(toBCD(p.hour), offset + 3);
+  buffer.writeUInt8(toBCD(p.minute), offset + 4);
+  buffer.writeUInt8(toBCD(p.second), offset + 5);
+  buffer.writeUInt8(toBCD(Math.floor(p.ms / 10)), offset + 6);
+  buffer.writeUInt8(((p.ms % 10) << 4) | p.weekday, offset + 7);
+}
+
+/** DTL: year (u16), month, day, weekday, hour, minute, second (u8 each), nanoseconds (u32). */
+function readDTL(buffer: Buffer, offset: number): Omit<DateParts, 'weekday'> {
+  return {
+    year: buffer.readUInt16BE(offset),
+    month: buffer.readUInt8(offset + 2),
+    day: buffer.readUInt8(offset + 3),
+    hour: buffer.readUInt8(offset + 5),
+    minute: buffer.readUInt8(offset + 6),
+    second: buffer.readUInt8(offset + 7),
+    ms: Math.floor(buffer.readUInt32BE(offset + 8) / 1e6),
+  };
+}
+
+function writeDTL(buffer: Buffer, offset: number, p: DateParts): void {
+  buffer.writeUInt16BE(p.year, offset);
+  buffer.writeUInt8(p.month, offset + 2);
+  buffer.writeUInt8(p.day, offset + 3);
+  buffer.writeUInt8(p.weekday, offset + 4);
+  buffer.writeUInt8(p.hour, offset + 5);
+  buffer.writeUInt8(p.minute, offset + 6);
+  buffer.writeUInt8(p.second, offset + 7);
+  buffer.writeUInt32BE(p.ms * 1e6, offset + 8);
 }
 
 /** Returns the byte length for a given S7 data type. */
@@ -41,7 +162,12 @@ export function byteLength(dataType: S7DataType, stringLength?: number): number 
     case 'LINT':
     case 'ULINT':
     case 'DATE_AND_TIME':
+    case 'DT':
+    case 'DTZ':
       return 8;
+    case 'DTL':
+    case 'DTLZ':
+      return 12;
     case 'STRING':
       return (stringLength ?? 254) + 2;
     case 'WSTRING':
@@ -49,8 +175,13 @@ export function byteLength(dataType: S7DataType, stringLength?: number): number 
   }
 }
 
-/** Reads a typed value from a buffer at the given offset. */
-export function readValue(buffer: Buffer, offset: number, dataType: S7DataType, bitOffset = 0): unknown {
+/**
+ * Reads a typed value from a buffer at the given offset. DT and DTL are the PLC's local time
+ * (read as the server's local time, like nodes7); DTZ and DTLZ are UTC. All four return a Date.
+ */
+export function readValue(
+  buffer: Buffer, offset: number, dataType: S7DataType, bitOffset = 0, options: ReadOptions = {},
+): unknown {
   const required = dataType === 'STRING' ? 2 : dataType === 'WSTRING' ? 4 : byteLength(dataType);
   if (buffer.length < offset + required) {
     throw new S7Error(S7ErrorCode.READ_FAILED, `Buffer too small for ${dataType} read at offset ${offset}: need ${offset + required} bytes, have ${buffer.length}`);
@@ -75,9 +206,9 @@ export function readValue(buffer: Buffer, offset: number, dataType: S7DataType, 
     case 'DINT':
       return buffer.readInt32BE(offset);
     case 'LINT':
-      return Number(buffer.readBigInt64BE(offset));
+      return int64Out(buffer.readBigInt64BE(offset), options.int64);
     case 'ULINT':
-      return Number(buffer.readBigUInt64BE(offset));
+      return int64Out(buffer.readBigUInt64BE(offset), options.int64);
     case 'REAL':
       return buffer.readFloatBE(offset);
     case 'LREAL':
@@ -115,21 +246,17 @@ export function readValue(buffer: Buffer, offset: number, dataType: S7DataType, 
       return buffer.readInt32BE(offset);
     case 'TIME_OF_DAY':
       return buffer.readUInt32BE(offset);
-    case 'DATE_AND_TIME': {
-      const yr = fromBCD(buffer.readUInt8(offset));
-      const mo = fromBCD(buffer.readUInt8(offset + 1));
-      const dy = fromBCD(buffer.readUInt8(offset + 2));
-      const hr = fromBCD(buffer.readUInt8(offset + 3));
-      const mi = fromBCD(buffer.readUInt8(offset + 4));
-      const sc = fromBCD(buffer.readUInt8(offset + 5));
-      const msHigh = fromBCD(buffer.readUInt8(offset + 6));
-      const msLowAndDow = buffer.readUInt8(offset + 7);
-      const msLow = (msLowAndDow >> 4) & 0x0f;
-      const ms = msHigh * 10 + msLow;
-      const fullYear = yr < 90 ? 2000 + yr : 1900 + yr;
-      const dt = new Date(Date.UTC(fullYear, mo - 1, dy, hr, mi, sc, ms));
-      return dt.toISOString();
-    }
+    case 'DATE_AND_TIME':
+      // Same layout as DTZ, but kept as an ISO string as before
+      return fromParts(readDT(buffer, offset), true).toISOString();
+    case 'DT':
+      return fromParts(readDT(buffer, offset), false);
+    case 'DTZ':
+      return fromParts(readDT(buffer, offset), true);
+    case 'DTL':
+      return fromParts(readDTL(buffer, offset), false);
+    case 'DTLZ':
+      return fromParts(readDTL(buffer, offset), true);
     case 'S5TIME': {
       const raw = buffer.readUInt16BE(offset);
       const timeBase = (raw >> 12) & 0x03;
@@ -196,7 +323,8 @@ export function stringWrite(
 
 /** Writes a typed value into a buffer at the given offset. */
 export function writeValue(buffer: Buffer, offset: number, dataType: S7DataType, value: unknown, bitOffset = 0): void {
-  const required = dataType === 'STRING' ? 2 : byteLength(dataType);
+  // A string only needs its header; the characters are fitted to what the buffer holds
+  const required = dataType === 'STRING' ? 2 : dataType === 'WSTRING' ? 4 : byteLength(dataType);
   if (buffer.length < offset + required) {
     throw new S7Error(S7ErrorCode.WRITE_FAILED, `Buffer too small for ${dataType} write at offset ${offset}: need ${offset + required} bytes, have ${buffer.length}`);
   }
@@ -244,10 +372,10 @@ export function writeValue(buffer: Buffer, offset: number, dataType: S7DataType,
       buffer.writeUInt32BE(Number(value), offset);
       break;
     case 'LINT':
-      buffer.writeBigInt64BE(BigInt(Math.round(Number(value))), offset);
+      buffer.writeBigInt64BE(int64In(value, 'LINT'), offset);
       break;
     case 'ULINT':
-      buffer.writeBigUInt64BE(BigInt(Math.round(Number(value))), offset);
+      buffer.writeBigUInt64BE(int64In(value, 'ULINT'), offset);
       break;
     case 'STRING': {
       const str = String(value);
@@ -283,24 +411,19 @@ export function writeValue(buffer: Buffer, offset: number, dataType: S7DataType,
     case 'TIME_OF_DAY':
       buffer.writeUInt32BE(Number(value), offset);
       break;
-    case 'DATE_AND_TIME': {
-      const dtVal = new Date(String(value));
-      const dtYear = dtVal.getUTCFullYear();
-      const yr2 = dtYear >= 2000 ? dtYear - 2000 : dtYear - 1900;
-      buffer.writeUInt8(toBCD(yr2), offset);
-      buffer.writeUInt8(toBCD(dtVal.getUTCMonth() + 1), offset + 1);
-      buffer.writeUInt8(toBCD(dtVal.getUTCDate()), offset + 2);
-      buffer.writeUInt8(toBCD(dtVal.getUTCHours()), offset + 3);
-      buffer.writeUInt8(toBCD(dtVal.getUTCMinutes()), offset + 4);
-      buffer.writeUInt8(toBCD(dtVal.getUTCSeconds()), offset + 5);
-      const dtMs = dtVal.getUTCMilliseconds();
-      const msH = Math.floor(dtMs / 10);
-      const msL = dtMs % 10;
-      buffer.writeUInt8(toBCD(msH), offset + 6);
-      const dow = dtVal.getUTCDay() === 0 ? 7 : dtVal.getUTCDay(); // 1=Mon..7=Sun
-      buffer.writeUInt8(((msL & 0x0f) << 4) | (dow & 0x0f), offset + 7);
+    case 'DATE_AND_TIME':
+    case 'DTZ':
+      writeDT(buffer, offset, dateIn(value, dataType, true, 1990, 2089));
       break;
-    }
+    case 'DT':
+      writeDT(buffer, offset, dateIn(value, dataType, false, 1990, 2089));
+      break;
+    case 'DTL':
+      writeDTL(buffer, offset, dateIn(value, dataType, false, 1970, 2262));
+      break;
+    case 'DTLZ':
+      writeDTL(buffer, offset, dateIn(value, dataType, true, 1970, 2262));
+      break;
     case 'S5TIME': {
       const totalMs = Math.max(0, Number(value));
       let base: number;
