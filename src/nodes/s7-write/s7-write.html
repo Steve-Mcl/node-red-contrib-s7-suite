@@ -78,6 +78,8 @@
           // The Add button passes no data; loading a saved schema always does
           if (Object.keys(data).length === 0) {
             setTimeout(function () { nameInput.trigger('focus'); }, 0);
+            // Same type at the next offset as the field above; the name is left to the user
+            s7SuiteSeedSchemaField(row, { type: typeSelect, offset: offsetInput, bit: bitInput, len: lenInput });
           }
         }
       });
@@ -362,7 +364,9 @@
     <pre>[{"name":"temperature","type":"REAL","offset":0},
  {"name":"setpoint","type":"INT","offset":4},
  {"name":"motorOn","type":"BOOL","offset":6,"bit":0}]</pre>
-    Only fields present in <code>msg.payload</code> are written; others are left unchanged.</dd>
+    Only fields present in <code>msg.payload</code> are written; others are left unchanged.
+    <b>Add field</b> starts the new field from the one above it: the same type, and the same length
+    for a string, at the next free offset, or the next bit for a BOOL. Only the name is left to type.</dd>
   </dl>
   <h4>Address Formats</h4>
   <ul>
