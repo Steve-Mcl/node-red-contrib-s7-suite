@@ -266,6 +266,9 @@
   <h4>Data Type Mapping</h4>
   <ul>
     <li><b>BOOL:</b> <code>true</code>/<code>false</code></li>
+    <li><b>Arrays:</b> an address with a length takes an array of that many values: <code>DB1,INT20.3</code>
+      is 3 INTs and <code>DB1,X10.3.8</code> is 8 consecutive bits from bit 3 of byte 10. A byte array
+      (<code>DB1,BYTE10.4</code>) also takes a Buffer. A value of the wrong length is rejected.</li>
     <li><b>BYTE/WORD/DWORD:</b> unsigned integer</li>
     <li><b>INT/DINT:</b> signed integer</li>
     <li><b>REAL/LREAL:</b> floating point number</li>

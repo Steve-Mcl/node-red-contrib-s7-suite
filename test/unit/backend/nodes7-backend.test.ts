@@ -234,7 +234,7 @@ describe('NodeS7Backend', () => {
 
     it('names the addresses nodes7 marked bad (it passes true, not an Error)', async () => {
       mockReadAllItems.mockImplementation((cb: Function) => {
-        cb(true, { 'DB1,REAL0': 3.14, 'DB6,REAL0': 'BAD 255', 'DB1,BYTE0.4': ['BAD 255', 'BAD 255'] });
+        cb(true, { 'DB1,REAL0': 'BAD 255', 'DB6,REAL0': 'BAD 255', 'DB1,BYTE0.4': ['BAD 255', 'BAD 255'] });
       });
 
       const read = backend.read(
@@ -246,7 +246,7 @@ describe('NodeS7Backend', () => {
       );
 
       await expect(read).rejects.toThrow(
-        'nodes7 read failed: bad quality for DB6,REAL0, DB1,BYTE0.4 (check that the address exists',
+        'nodes7 read failed: bad quality for DB1,REAL0, DB6,REAL0, DB1,BYTE0.4 (check that the address exists',
       );
     });
 
@@ -255,13 +255,31 @@ describe('NodeS7Backend', () => {
         cb(true, { 'DB1,STRING0.10': 'BAD BATCH', 'DB6,REAL0': 'BAD 10' });
       });
 
-      await expect(
-        backend.read(['DB1,STRING0.10', 'DB6,REAL0'].map((a) => ({
-          name: a,
-          address: { area: 'DB' as const, dbNumber: 1, dataType: 'STRING' as const, offset: 0, bitOffset: 0 },
-          nodes7Address: a,
-        }))),
-      ).rejects.toThrow(/bad quality for DB6,REAL0 \(/);
+      const results = await backend.read(['DB1,STRING0.10', 'DB6,REAL0'].map((a) => ({
+        name: a,
+        address: { area: 'DB' as const, dbNumber: 1, dataType: 'STRING' as const, offset: 0, bitOffset: 0 },
+        nodes7Address: a,
+      })));
+
+      expect(results[0]).toMatchObject({ value: 'BAD BATCH', quality: 'good' });
+      expect(results[1]).toMatchObject({ value: null, quality: 'bad' });
+    });
+
+    it('still returns the good values when one address in the read is bad', async () => {
+      mockReadAllItems.mockImplementation((cb: Function) => {
+        cb(true, { 'DB1,INT0': 11, 'DB1,REAL200': 'BAD 255', 'DB1,BYTE0.2': ['BAD 255', 'BAD 255'] });
+      });
+
+      const results = await backend.read(['DB1,INT0', 'DB1,REAL200', 'DB1,BYTE0.2'].map((a) => ({
+        name: a,
+        address: { area: 'DB' as const, dbNumber: 1, dataType: 'INT' as const, offset: 0, bitOffset: 0 },
+        nodes7Address: a,
+      })));
+
+      expect(results[0]).toMatchObject({ value: 11, quality: 'good', error: undefined });
+      expect(results[1]).toMatchObject({ value: null, quality: 'bad' });
+      expect(results[1].error).toContain('bad quality for DB1,REAL200 (check that the address exists');
+      expect(results[2]).toMatchObject({ value: null, quality: 'bad' });
     });
 
     it('throws when not connected', async () => {
@@ -338,6 +356,17 @@ describe('NodeS7Backend', () => {
           },
         ]),
       ).rejects.toThrow('nodes7 write failed: bad quality for DB6,INT0, DB6,INT2 (');
+    });
+
+    it('refuses an array of the wrong length instead of letting nodes7 pad it', async () => {
+      const address = { area: 'DB' as const, dbNumber: 1, dataType: 'BYTE' as const, offset: 10, bitOffset: 0, arrayLength: 4 };
+      await expect(backend.write([{ name: 'a', address, nodes7Address: 'DB1,BYTE10.4', value: [1, 2] }]))
+        .rejects.toThrow('needs 4 values; got 2');
+      expect(mockWriteItems).not.toHaveBeenCalled();
+
+      mockWriteItems.mockImplementation((_n: unknown, _v: unknown, cb: Function) => cb());
+      await backend.write([{ name: 'a', address, nodes7Address: 'DB1,BYTE10.4', value: Buffer.from([1, 2, 3, 4]) }]);
+      expect(mockWriteItems.mock.calls[0][1]).toEqual([[1, 2, 3, 4]]);
     });
 
     // readAllItems answers the header read for whichever BYTE item was added

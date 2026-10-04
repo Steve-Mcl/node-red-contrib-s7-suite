@@ -20,6 +20,16 @@ describe('Poller', () => {
       expect(changed(poller, new Date(t), new Date(t + 1))).toBe(true);
     });
 
+    it('compares arrays and Buffers by what they hold, not by object', () => {
+      poller = new Poller({ interval: 50, edgeMode: 'any', deadband: 0 });
+      expect(changed(poller, [11, 22, 33], [11, 22, 33])).toBe(false);
+      expect(changed(poller, [11, 22, 33], [11, 22, 34])).toBe(true);
+      expect(changed(poller, [11, 22], [11, 22, 33])).toBe(true);
+      expect(changed(poller, [true, false], [true, false])).toBe(false);
+      expect(changed(poller, Buffer.from([1, 2]), Buffer.from([1, 2]))).toBe(false);
+      expect(changed(poller, Buffer.from([1, 2]), Buffer.from([1, 3]))).toBe(true);
+    });
+
     it('applies the deadband to BigInt values', () => {
       poller = new Poller({ interval: 50, edgeMode: 'any', deadband: 5 });
       expect(changed(poller, 9007199254740993n, 9007199254740996n)).toBe(false);

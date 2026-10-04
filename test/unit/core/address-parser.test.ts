@@ -345,4 +345,46 @@ describe('address-parser', () => {
       expect(toNodes7Address(parseAddress('DB1,STRING50'))).toBe('DB1,STRING50');
     });
   });
+
+  describe('array lengths and bit ranges', () => {
+    it.each([
+      ['DB1,BYTE10.4', 'BYTE', 10, 4],
+      ['DB1,REAL0.3', 'REAL', 0, 3],
+      ['DB1,BYTE10.12', 'BYTE', 10, 12],
+      ['DB1,BYTE10.0.4', 'BYTE', 10, 4],
+      ['QB0.4', 'BYTE', 0, 4],
+      ['MW10.0.3', 'WORD', 10, 3],
+    ])('reads %s as an array, like nodes7', (input, dataType, offset, arrayLength) => {
+      expect(parseAddress(input)).toMatchObject({ dataType, offset, bitOffset: 0, arrayLength });
+    });
+
+    it.each(['DB1,BYTE10.4', 'DB1,BYTE10.0.4'])('sends %s to nodes7 as DB1,BYTE10.4', (input) => {
+      expect(toNodes7Address(parseAddress(input))).toBe('DB1,BYTE10.4');
+    });
+
+    it('rejects a bit offset on a type that has no bits', () => {
+      expect(() => parseAddress('DB1,REAL0.3.2')).toThrow('Bit offset 3 is only valid for a BOOL');
+      expect(() => parseAddress('MB0.1.4')).toThrow('Bit offset 1 is only valid for a BOOL');
+    });
+
+    it('rejects an array length of 0', () => {
+      expect(() => parseAddress('DB1,BYTE10.0')).toThrow('Array length must be 1 or more');
+    });
+
+    it.each([
+      ['DB1,X10.3.8', 'DB', 'DB1,X10.3.8'],
+      ['DB1,BOOL10.3.8', 'DB', 'DB1,X10.3.8'],
+      ['M10.3.8', 'M', 'M10.3.8'],
+      ['Q0.1', 'Q', 'Q0.1'],
+    ])('keeps the bit and the count of %s', (input, area, nodes7) => {
+      const addr = parseAddress(input);
+      expect(addr).toMatchObject({ area, dataType: 'BOOL' });
+      expect(toNodes7Address(addr)).toBe(nodes7);
+    });
+
+    it('rejects a bit offset above 7 instead of reading it as a count', () => {
+      expect(() => parseAddress('DB1,X0.12')).toThrow(/Bit offset must be 0-7/);
+      expect(() => parseAddress('M10.12')).toThrow(/Bit offset must be 0-7/);
+    });
+  });
 });

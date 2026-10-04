@@ -329,6 +329,45 @@ describe('Snap7Backend', () => {
       });
     });
 
+    it('writes every byte of a byte array', async () => {
+      mockWriteArea.mockImplementation(
+        (_a: unknown, _d: unknown, _s: unknown, _l: unknown, _w: unknown, _b: unknown, cb: Function) => cb(),
+      );
+
+      await backend.write([
+        {
+          name: 'bytes',
+          address: { area: 'DB', dbNumber: 1, dataType: 'BYTE', offset: 10, bitOffset: 0, arrayLength: 4 },
+          value: Buffer.from([1, 2, 3, 4]),
+        },
+      ]);
+
+      const [, , start, length, , written] = mockWriteArea.mock.calls[0];
+      expect([start, length, [...written]]).toEqual([10, 4, [1, 2, 3, 4]]);
+    });
+
+    it('reads and writes a bit array as consecutive bits, keeping the bits around it', async () => {
+      mockReadArea.mockImplementation(
+        (_a: unknown, _d: unknown, _s: unknown, l: number, _w: unknown, cb: Function) => cb(undefined, Buffer.from([0x01, 0x80]).subarray(0, l)),
+      );
+      mockWriteArea.mockImplementation(
+        (_a: unknown, _d: unknown, _s: unknown, _l: unknown, _w: unknown, _b: unknown, cb: Function) => cb(),
+      );
+      const address = { area: 'DB' as const, dbNumber: 1, dataType: 'BOOL' as const, offset: 10, bitOffset: 3, arrayLength: 8 };
+
+      await backend.write([{ name: 'bits', address, value: Array(8).fill(true) }]);
+
+      expect(mockReadArea.mock.calls[0].slice(2, 4)).toEqual([10, 2]);
+      const [, , start, length, , written] = mockWriteArea.mock.calls[0];
+      expect([start, length, [...written]]).toEqual([10, 2, [0xf9, 0x87]]);
+
+      mockReadArea.mockImplementation(
+        (_a: unknown, _d: unknown, _s: unknown, _l: unknown, _w: unknown, cb: Function) => cb(undefined, Buffer.from([0xf8, 0x07])),
+      );
+      const results = await backend.read([{ name: 'bits', address }]);
+      expect(results[0].value).toEqual(Array(8).fill(true));
+    });
+
     it('writes REAL value', async () => {
       mockWriteArea.mockImplementation(
         (_a: unknown, _d: unknown, _s: unknown, _l: unknown, _w: unknown, _b: unknown, cb: Function) => cb(),

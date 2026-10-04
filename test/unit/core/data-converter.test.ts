@@ -1,5 +1,8 @@
-import { byteLength, readValue, stringWrite, writeValue } from '../../../src/core/data-converter';
+import {
+  addressByteLength, byteLength, readAddressValue, readValue, stringWrite, writeAddressValue, writeValue,
+} from '../../../src/core/data-converter';
 import { S7Error } from '../../../src/utils/error-codes';
+import { parseAddress } from '../../../src/core/address-parser';
 
 describe('data-converter', () => {
   describe('byteLength', () => {
@@ -665,6 +668,54 @@ describe('data-converter', () => {
       writeValue(b, 0, 'DTZ', when);
       expect(a).toEqual(b);
       expect(readValue(a, 0, 'DATE_AND_TIME')).toBe('2024-03-17T10:30:45.123Z');
+    });
+  });
+
+  describe('arrays', () => {
+    it('sizes a typed array by its element count and a bit array by the bytes its bits span', () => {
+      expect(addressByteLength(parseAddress('DB1,INT0.3'))).toBe(6);
+      expect(addressByteLength(parseAddress('DB1,X10.3.8'))).toBe(2);
+      expect(addressByteLength(parseAddress('DB1,X10.0.8'))).toBe(1);
+      expect(addressByteLength(parseAddress('DB1,X10.3'))).toBe(1);
+    });
+
+    it('reads a bit array as consecutive bits, running into the next byte', () => {
+      // bits 3 to 10 set: byte 0 = 0xF8, byte 1 = 0x07
+      const buf = Buffer.from([0xf8, 0x07]);
+      expect(readAddressValue(buf, 0, parseAddress('DB1,X0.3.8'))).toEqual(Array(8).fill(true));
+      expect(readAddressValue(buf, 0, parseAddress('DB1,X0.0.4'))).toEqual([false, false, false, true]);
+    });
+
+    it('writes a bit array without touching the bits around it', () => {
+      const buf = Buffer.from([0x01, 0x80]);
+      writeAddressValue(buf, 0, parseAddress('DB1,X0.3.8'), Array(8).fill(true));
+      expect([...buf]).toEqual([0xf9, 0x87]);
+      writeAddressValue(buf, 0, parseAddress('DB1,X0.3.8'), Array(8).fill(false));
+      expect([...buf]).toEqual([0x01, 0x80]);
+    });
+
+    it('writes an array of bytes from an array or a Buffer', () => {
+      const addr = parseAddress('DB1,BYTE10.0.4');
+      const a = Buffer.alloc(4);
+      const b = Buffer.alloc(4);
+      writeAddressValue(a, 0, addr, [1, 2, 3, 4]);
+      writeAddressValue(b, 0, addr, Buffer.from([1, 2, 3, 4]));
+      expect([...a]).toEqual([1, 2, 3, 4]);
+      expect(b).toEqual(a);
+    });
+
+    it('writes an array of a wider type', () => {
+      const buf = Buffer.alloc(6);
+      writeAddressValue(buf, 0, parseAddress('DB1,INT0.3'), [10, -20, 30]);
+      expect(readAddressValue(buf, 0, parseAddress('DB1,INT0.3'))).toEqual([10, -20, 30]);
+    });
+
+    it('rejects a value that is not an array of the right length', () => {
+      const addr = parseAddress('DB1,BYTE10.0.4');
+      expect(() => writeAddressValue(Buffer.alloc(4), 0, addr, [1, 2, 3])).toThrow('needs 4 values; got 3');
+      expect(() => writeAddressValue(Buffer.alloc(4), 0, addr, 7)).toThrow('needs an array or a Buffer of values');
+      expect(() => writeAddressValue(Buffer.alloc(6), 0, parseAddress('DB1,INT0.3'), Buffer.alloc(6)))
+        .toThrow('An array of 3 INT needs an array of values');
     });
   });
 });

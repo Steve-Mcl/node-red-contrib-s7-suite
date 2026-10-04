@@ -2,7 +2,7 @@ import { IS7Backend } from './s7-backend.interface';
 import { S7ConnectionConfig } from '../types/s7-connection';
 import { S7ReadItem, S7ReadResult, S7WriteItem, AREA_CODE_MAP } from '../types/s7-address';
 import { S7BlockInfo, S7BlockList, S7BlockType } from '../types/s7-browse';
-import { byteLength, readValue, ReadOptions, stringWrite, writeValue } from '../core/data-converter';
+import { addressByteLength, readAddressValue, ReadOptions, stringWrite, writeAddressValue } from '../core/data-converter';
 import { S7Error, S7ErrorCode, describeError, describeRawRequest } from '../utils/error-codes';
 
 const BLOCK_TYPE_MAP: Record<S7BlockType, number> = {
@@ -163,21 +163,8 @@ export class Snap7Backend implements IS7Backend {
         if (areaCode === undefined) {
           throw new S7Error(S7ErrorCode.READ_FAILED, `Unsupported area: ${addr.area}`);
         }
-        const len = byteLength(addr.dataType, addr.stringLength);
-        const totalLen = addr.arrayLength ? len * addr.arrayLength : len;
-
-        const buffer = await this.readRawArea(areaCode, addr.dbNumber, addr.offset, totalLen);
-
-        let value: unknown;
-        if (addr.arrayLength) {
-          const arr: unknown[] = [];
-          for (let i = 0; i < addr.arrayLength; i++) {
-            arr.push(readValue(buffer, i * len, addr.dataType, addr.bitOffset, this.readOptions));
-          }
-          value = arr;
-        } else {
-          value = readValue(buffer, 0, addr.dataType, addr.bitOffset, this.readOptions);
-        }
+        const buffer = await this.readRawArea(areaCode, addr.dbNumber, addr.offset, addressByteLength(addr));
+        const value = readAddressValue(buffer, 0, addr, this.readOptions);
 
         results.push({
           name: item.name,
@@ -217,13 +204,13 @@ export class Snap7Backend implements IS7Backend {
       if (areaCode === undefined) {
         throw new S7Error(S7ErrorCode.WRITE_FAILED, `Unsupported area: ${addr.area}`);
       }
-      const len = byteLength(addr.dataType, addr.stringLength);
+      const len = addressByteLength(addr);
 
       if (addr.dataType === 'BOOL') {
-        // Read-modify-write for booleans
-        const buf = await this.readRawArea(areaCode, addr.dbNumber, addr.offset, 1);
-        writeValue(buf, 0, 'BOOL', item.value, addr.bitOffset);
-        await this.writeRawArea(areaCode, addr.dbNumber, addr.offset, 1, buf);
+        // Read-modify-write for booleans, so the other bits in those bytes are kept
+        const buf = await this.readRawArea(areaCode, addr.dbNumber, addr.offset, len);
+        writeAddressValue(buf, 0, addr, item.value);
+        await this.writeRawArea(areaCode, addr.dbNumber, addr.offset, len, buf);
       } else if (addr.dataType === 'STRING' || addr.dataType === 'WSTRING') {
         // Size the write from the string's header in the PLC, so nothing past the string is touched
         const header = await this.readRawArea(areaCode, addr.dbNumber, addr.offset, addr.dataType === 'WSTRING' ? 4 : 2);
@@ -232,7 +219,7 @@ export class Snap7Backend implements IS7Backend {
         await this.writeRawArea(areaCode, addr.dbNumber, addr.offset + start, bytes.length, bytes);
       } else {
         const buf = Buffer.alloc(len);
-        writeValue(buf, 0, addr.dataType, item.value, addr.bitOffset);
+        writeAddressValue(buf, 0, addr, item.value);
         await this.writeRawArea(areaCode, addr.dbNumber, addr.offset, len, buf);
       }
     }

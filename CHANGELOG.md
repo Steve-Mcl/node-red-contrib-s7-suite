@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **Writing several values to one address** (`DB1,BYTE10.0.4`, `DB1,INT20.3`) wrote a single zero on the snap7 and sim backends. They now write every element, from an array or, for bytes, a Buffer. A value whose length doesn't match the address is rejected on every backend instead of being written short (#47)
+- **Bit arrays** (`DB1,X10.3.8`, `M10.3.8`) are 8 consecutive bits from bit 3 of byte 10 on every backend, read and write. snap7 and the sim used to read one bit per byte and write a single bit, and the count was dropped for `M`/`I`/`Q` bits on nodes7 (#51)
+- **s7-trigger fired on every poll for an array address**: arrays and Buffers are now compared by content (#48)
+- **nodes7: one bad address no longer fails the whole read**. The good values are returned and the bad items are marked `bad` with a reason, as on snap7. A read with no good value at all still fails (#49)
+
+### Changed
+- **A single number after the offset is the array length**, as in nodes7: `DB1,BYTE10.4` is 4 bytes and `QB0.4` is 4 bytes (they used to read as one value). `DB1,BYTE10.0.4` still means the same. A bit offset on a type without bits (`DB1,REAL0.3.2`) and a bit offset above 7 (`M10.12`) are now errors instead of being ignored (#50)
+
 ## [0.0.8] - 2026-08-26
 
 ### Changed
