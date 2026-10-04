@@ -23,7 +23,7 @@
       s7SuiteStatusDot('#node-input-server', '#s7r-status-dot');
 
       // editableList for addresses with optional labels
-      var addrList = $('#s7r-address-list').css({ 'min-height': '300px', 'min-width': '300px' }).editableList({
+      var addrList = $('#s7r-address-list').css({ 'min-height': '150px' }).editableList({
         addButton: 'Add address',
         removable: true,
         sortable: true,
@@ -35,8 +35,13 @@
           var labelInput = $('<input type="text" class="s7r-label" placeholder="Label (optional)" style="flex:1;">').val(labelVal);
           container.append(addrInput, labelInput);
           row.append(container);
+          // The Add button passes no data; loading, Import and Browse always do
+          if (Object.keys(data).length === 0) {
+            setTimeout(function () { addrInput.trigger('focus'); }, 0);
+          }
         }
       });
+      s7SuiteAccelerator(addrList, 'a');
 
       // Load existing addresses with labels
       var existingLabels = {};
@@ -47,6 +52,15 @@
         parts.forEach(function (a) {
           if (a) addrList.editableList('addItem', { address: a, label: existingLabels[a] || '' });
         });
+        scrollListToTop(addrList);
+      }
+
+      // editableList scrolls to the bottom after every addItem (on a timeout), which leaves a
+      // reopened node showing the end of its list. Queue a scroll back to the top after those.
+      function scrollListToTop(list) {
+        setTimeout(function () {
+          list.closest('.red-ui-editableList-container').scrollTop(0);
+        }, 0);
       }
 
       // CSV/Excel/CFG/TIA-XML import
@@ -330,20 +344,21 @@
 
       // Schema editableList for struct mode
       var S7_TYPES = ['BOOL','BYTE','WORD','DWORD','INT','DINT','REAL','LREAL','CHAR','STRING'];
-      var schemaList = $('#s7r-schema-list').css({ 'min-height': '250px', 'min-width': '300px' }).editableList({
+      var schemaList = $('#s7r-schema-list').css({ 'min-height': '150px' }).editableList({
         addButton: 'Add field',
         removable: true,
         sortable: true,
         addItem: function (row, index, data) {
-          var nameInput = $('<input type="text" placeholder="Field name" style="width:22%;">').val(data.name || '');
-          var typeSelect = $('<select style="width:22%;margin-left:2%;">');
+          // Name takes the spare width; the rest are sized for their content
+          var nameInput = $('<input type="text" placeholder="Field name" style="flex:1;min-width:80px;">').val(data.name || '');
+          var typeSelect = $('<select style="flex:0 0 100px;">');
           S7_TYPES.forEach(function(t) {
             typeSelect.append($('<option>').val(t).text(t));
           });
           typeSelect.val(data.type || 'REAL');
-          var offsetInput = $('<input type="number" placeholder="Offset" style="width:18%;margin-left:2%;" min="0">').val(data.offset != null ? data.offset : '');
-          var bitInput = $('<input type="number" placeholder="Bit" style="width:14%;margin-left:2%;" min="0" max="7">').val(data.bit != null ? data.bit : '');
-          var lenInput = $('<input type="number" placeholder="Str len" style="width:14%;margin-left:2%;" min="1">').val(data.length != null ? data.length : '');
+          var offsetInput = $('<input type="number" placeholder="Offset" style="flex:0 0 80px;min-width:0;" min="0">').val(data.offset != null ? data.offset : '');
+          var bitInput = $('<input type="number" placeholder="Bit" style="flex:0 0 60px;min-width:0;" min="0" max="7">').val(data.bit != null ? data.bit : '');
+          var lenInput = $('<input type="number" placeholder="Str len" style="flex:0 0 80px;min-width:0;" min="1">').val(data.length != null ? data.length : '');
 
           function updateVisibility() {
             var t = typeSelect.val();
@@ -352,10 +367,17 @@
           }
           typeSelect.on('change', updateVisibility);
 
-          row.append(nameInput, typeSelect, offsetInput, bitInput, lenInput);
+          $('<div style="display:flex;gap:4px;align-items:center;">')
+            .append(nameInput, typeSelect, offsetInput, bitInput, lenInput)
+            .appendTo(row);
           updateVisibility();
+          // The Add button passes no data; loading a saved schema always does
+          if (Object.keys(data).length === 0) {
+            setTimeout(function () { nameInput.trigger('focus'); }, 0);
+          }
         }
       });
+      s7SuiteAccelerator(schemaList, 'a');
 
       // Load existing schema
       try {
@@ -364,6 +386,7 @@
           schemaArr.forEach(function (f) {
             schemaList.editableList('addItem', f);
           });
+          scrollListToTop(schemaList);
         }
       } catch (e) { /* ignore */ }
 
@@ -377,9 +400,16 @@
         $('#s7r-buffer-hint').toggle(mode === 'buffer');
         $('#s7r-bits-hint').toggle(mode === 'bits');
         $('#s7r-struct-hint').toggle(mode === 'struct');
+        // Both lists use Alt+A; only the visible one may own it
+        s7SuiteAccelerator(addrList, 'a', isAddressList);
+        s7SuiteAccelerator(schemaList, 'a', mode === 'struct');
       }
 
-      $('#node-input-outputMode').on('change', updateModeUI);
+      $('#node-input-outputMode').on('change', function () {
+        updateModeUI();
+        // A different list (or none) is now visible; let oneditresize size it
+        RED.tray.resize();
+      });
 
       // For buffer/struct/bits modes, show a single address input
       // Pre-fill single address from first address in list
@@ -395,11 +425,23 @@
       updateModeUI();
     },
     oneditresize: function (size) {
-      // Make the address/schema lists grow with the dialog height
-      var rowHeight = 80;
-      var listHeight = Math.max(200, size.height - rowHeight - 280);
-      $('#s7r-address-list').css('height', listHeight + 'px');
-      $('#s7r-schema-list').css('height', listHeight + 'px');
+      // Give the visible list (addresses or schema) the height the other rows leave, as the
+      // change and switch nodes do. Size it through editableList('height'): setting a CSS height
+      // on the <ol> itself fights editableList's own scroll container.
+      var height = size.height;
+      $('#dialog-form > div:visible').not('#s7r-address-list-section, #s7r-schema-section').each(function () {
+        height -= $(this).outerHeight(true);
+      });
+      $('#s7r-address-list-section:visible, #s7r-schema-section:visible').each(function () {
+        var section = $(this);
+        var listRow = section.children('.s7r-list-row');
+        var listHeight = height;
+        section.children().not(listRow).each(function () {
+          listHeight -= $(this).outerHeight(true);
+        });
+        listHeight -= parseInt(listRow.css('marginTop'), 10) + parseInt(listRow.css('marginBottom'), 10);
+        listRow.find('ol').editableList('height', Math.max(150, listHeight));
+      });
     },
     oneditsave: function () {
       var mode = $('#node-input-outputMode').val();
@@ -481,8 +523,10 @@
           <button type="button" id="s7r-browse-btn" class="red-ui-button red-ui-button-small" title="Browse PLC addresses"><i class="fa fa-search"></i> Browse</button>
           <button type="button" id="s7r-import-btn" class="red-ui-button red-ui-button-small" title="Import tag list from CSV, Excel, a TIA Portal tag table export (.xlsx, .xml, .sdf), or a STEP 7 .cfg hardware export"><i class="fa fa-upload"></i> Import CSV/Excel/CFG/XML</button>
         </div>
-        <ol id="s7r-address-list"></ol>
       </div>
+    </div>
+    <div class="form-row s7r-list-row">
+      <ol id="s7r-address-list"></ol>
     </div>
   </div>
   <div id="s7r-single-address-section" style="display:none;">
@@ -506,9 +550,9 @@
   <div id="s7r-schema-section" style="display:none;">
     <div class="form-row">
       <label style="vertical-align:top;"><i class="fa fa-th-list"></i> Schema</label>
-      <div style="display:inline-block;width:70%;">
-        <ol id="s7r-schema-list"></ol>
-      </div>
+    </div>
+    <div class="form-row s7r-list-row">
+      <ol id="s7r-schema-list"></ol>
     </div>
   </div>
   <div id="s7r-browse-dialog" style="display:none;border:1px solid #ccc;border-radius:4px;padding:8px;margin-top:8px;background:#fafafa;max-height:400px;overflow:hidden;">

@@ -25,6 +25,32 @@
     }, 1000);
   };
 
+  // Keyboard accelerator for an editableList's Add button: a native accesskey, the letter
+  // underlined in the label, and a tooltip naming the keys (the modifier depends on browser/OS).
+  // Pass enabled=false for a list that is currently hidden, so two lists sharing a key in one
+  // dialog can't both claim it.
+  window.s7SuiteAccelerator = function (list, key, enabled) {
+    var btn = list.closest('.red-ui-editableList').children('.red-ui-editableList-addButton').first();
+    if (enabled === false) {
+      btn.removeAttr('accesskey');
+      return;
+    }
+    var span = btn.children('span').first();
+    var text = span.text();
+    var i = text.toLowerCase().indexOf(key.toLowerCase());
+    if (i >= 0 && span.children('u').length === 0) {
+      span.empty().append(
+        document.createTextNode(text.slice(0, i)),
+        $('<u>').text(text.charAt(i)),
+        document.createTextNode(text.slice(i + 1))
+      );
+    }
+    var ua = navigator.userAgent;
+    var combo = /Mac|iPhone|iPad/.test(navigator.platform || ua) ? 'Control+Option+'
+      : /Firefox\//.test(ua) ? 'Alt+Shift+' : 'Alt+';
+    btn.attr('accesskey', key).attr('title', text.trim() + ' (' + combo + key.toUpperCase() + ')');
+  };
+
   // Browse dialog with tree/category structure
   // opts: { btnId, closeId, filterId, statusId, resultsId, dialogId, serverId, addressId, mode: 'replace'|'append'|'list', listRef }
   window.s7SuiteBrowseDialog = function (opts) {
