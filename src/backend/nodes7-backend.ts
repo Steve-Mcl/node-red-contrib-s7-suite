@@ -3,7 +3,24 @@ import { S7ConnectionConfig } from '../types/s7-connection';
 import { S7ReadItem, S7ReadResult, S7WriteItem } from '../types/s7-address';
 import { S7BlockInfo, S7BlockList, S7BlockType } from '../types/s7-browse';
 import { toNodes7Address } from '../core/address-parser';
-import { S7Error, S7ErrorCode } from '../utils/error-codes';
+import { S7Error, S7ErrorCode, describeError, describeRawRequest } from '../utils/error-codes';
+
+const BAD_QUALITY_HINT = ' (check that the address exists and is within the area or DB size)';
+
+/**
+ * Describes a failed nodes7 read/write. nodes7 passes `true` rather than an Error, and its
+ * per-item quality doesn't say why (a missing DB and an out-of-range address both read
+ * "BAD 255"), so name the addresses it marked bad, or all of them when there are no values.
+ */
+function failureDetail(err: unknown, addrs: string[], values?: Record<string, unknown>): string {
+  if (err instanceof Error) return err.message;
+  const isBad = (v: unknown): boolean =>
+    (Array.isArray(v) ? v : [v]).some((q) => typeof q === 'string' && /^BAD \d+$/.test(q));
+  const bad = values ? addrs.filter((a) => isBad(values[a])) : [];
+  return `bad quality for ${(bad.length > 0 ? bad : addrs).join(', ')}${BAD_QUALITY_HINT}`;
+}
+
+const causeOf = (err: unknown): Error | undefined => (err instanceof Error ? err : undefined);
 
 export class NodeS7Backend implements IS7Backend {
   private conn: any = null; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -35,9 +52,9 @@ export class NodeS7Backend implements IS7Backend {
     }
 
     return new Promise<void>((resolve, reject) => {
-      this.conn.initiateConnection(connParams, (err: Error | undefined) => {
+      this.conn.initiateConnection(connParams, (err: unknown) => {
         if (err) {
-          reject(new S7Error(S7ErrorCode.CONNECTION_FAILED, `nodes7 connection failed: ${err.message}`, err));
+          reject(new S7Error(S7ErrorCode.CONNECTION_FAILED, `nodes7 connection failed: ${describeError(err)}`, causeOf(err)));
         } else {
           this.connected = true;
           resolve();
@@ -81,11 +98,15 @@ export class NodeS7Backend implements IS7Backend {
 
     return new Promise<S7ReadResult[]>((resolve, reject) => {
       try {
-        this.conn.readAllItems((err: Error | undefined, values: Record<string, unknown>) => {
+        this.conn.readAllItems((err: unknown, values: Record<string, unknown>) => {
           removeAll();
 
           if (err) {
-            reject(new S7Error(S7ErrorCode.READ_FAILED, `nodes7 read failed: ${err.message}`, err));
+            reject(new S7Error(
+              S7ErrorCode.READ_FAILED,
+              `nodes7 read failed: ${failureDetail(err, addrList, values)}`,
+              causeOf(err),
+            ));
             return;
           }
 
@@ -135,10 +156,10 @@ export class NodeS7Backend implements IS7Backend {
 
     return new Promise<void>((resolve, reject) => {
       try {
-        this.conn.writeItems(names, values, (err: Error | undefined) => {
+        this.conn.writeItems(names, values, (err: unknown) => {
           removeAll();
           if (err) {
-            reject(new S7Error(S7ErrorCode.WRITE_FAILED, `nodes7 write failed: ${err.message}`, err));
+            reject(new S7Error(S7ErrorCode.WRITE_FAILED, `nodes7 write failed: ${failureDetail(err, names)}`, causeOf(err)));
           } else {
             resolve();
           }
@@ -178,10 +199,15 @@ export class NodeS7Backend implements IS7Backend {
     this.conn.addItems(addr);
 
     return new Promise<Buffer>((resolve, reject) => {
-      this.conn.readAllItems((err: Error | undefined, values: Record<string, unknown>) => {
+      this.conn.readAllItems((err: unknown, values: Record<string, unknown>) => {
         this.conn.removeItems(addr);
         if (err) {
-          reject(new S7Error(S7ErrorCode.READ_FAILED, `Raw read failed: ${err.message}`, err));
+          // Describe the request rather than the internal nodes7 address (DB1,BYTE200.8), which
+          // the user never typed: struct, buffer and bits modes all read through here.
+          const detail = err instanceof Error
+            ? err.message
+            : `bad quality reading ${describeRawRequest(area, dbNumber, start, length)}${BAD_QUALITY_HINT}`;
+          reject(new S7Error(S7ErrorCode.READ_FAILED, `Raw read failed: ${detail}`, causeOf(err)));
           return;
         }
         const val = values[addr];

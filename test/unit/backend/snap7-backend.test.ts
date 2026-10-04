@@ -12,9 +12,11 @@ const mockListBlocks = jest.fn();
 const mockListBlocksOfType = jest.fn();
 const mockGetAgBlockInfo = jest.fn();
 const mockReadSZL = jest.fn();
+const mockErrorText = jest.fn();
 
 jest.mock('node-snap7', () => ({
   S7Client: jest.fn().mockImplementation(() => ({
+    ErrorText: mockErrorText,
     Connect: mockConnect,
     ConnectTo: mockConnectTo,
     Disconnect: mockDisconnect,
@@ -84,6 +86,19 @@ describe('Snap7Backend', () => {
           plcType: 'S7-1200', backend: 'snap7',
         }),
       ).rejects.toThrow('snap7 connection failed');
+    });
+
+    it('turns a numeric snap7 error code into text with ErrorText()', async () => {
+      // node-snap7 passes a number, not an Error (10061 = connection refused on Windows)
+      mockErrorText.mockImplementation((code: number) => (code === 10061 ? ' TCP : Connection refused' : '?'));
+      mockConnectTo.mockImplementation((_h: unknown, _r: unknown, _s: unknown, cb: Function) => cb(10061));
+
+      await expect(
+        backend.connect({
+          host: '192.168.1.100', port: 102, rack: 0, slot: 1,
+          plcType: 'S7-1200', backend: 'snap7',
+        }),
+      ).rejects.toThrow(/^snap7 connection failed: TCP : Connection refused$/);
     });
 
     it('handles TSAP connection failure', async () => {
@@ -187,6 +202,39 @@ describe('Snap7Backend', () => {
 
       expect(results[0].quality).toBe('bad');
       expect(results[0].error).toBeDefined();
+    });
+
+    it('reports the snap7 reason for a failed item read', async () => {
+      mockErrorText.mockImplementation(() => 'CPU : Address out of range');
+      mockReadArea.mockImplementation(
+        (_a: unknown, _d: unknown, _s: unknown, _l: unknown, _w: unknown, cb: Function) => cb(0x00900000),
+      );
+
+      const results = await backend.read([
+        { name: 'x', address: { area: 'DB', dbNumber: 1, dataType: 'REAL', offset: 98, bitOffset: 0 } },
+      ]);
+
+      expect(mockErrorText).toHaveBeenCalledWith(0x00900000);
+      expect(results[0].error).toBe('snap7 read failed: CPU : Address out of range (4 bytes at DB1 offset 98)');
+    });
+
+    it('says where a raw read or write failed', async () => {
+      mockErrorText.mockImplementation(() => 'CPU : Item not available');
+      mockReadArea.mockImplementation(
+        (_a: unknown, _d: unknown, _s: unknown, _l: unknown, _w: unknown, cb: Function) => cb(0x00c00000),
+      );
+      mockWriteArea.mockImplementation(
+        (_a: unknown, _d: unknown, _s: unknown, _l: unknown, _w: unknown, _b: unknown, cb: Function) => cb(0x00c00000),
+      );
+
+      await expect(backend.readRawArea(0x83, 0, 300, 1)).rejects.toThrow(
+        'snap7 read failed: CPU : Item not available (1 byte at area M offset 300)',
+      );
+      await expect(
+        backend.write([
+          { name: 'w', address: { area: 'DB', dbNumber: 6, dataType: 'INT', offset: 2, bitOffset: 0 }, value: 1 },
+        ]),
+      ).rejects.toThrow('snap7 write failed: CPU : Item not available (2 bytes at DB6 offset 2)');
     });
 
     it('throws when not connected', async () => {
