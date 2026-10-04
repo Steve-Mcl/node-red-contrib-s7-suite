@@ -243,7 +243,8 @@
   <dl>
     <dt>Single value</dt>
     <dd>Writes <code>msg.payload</code> to the configured PLC address.
-    If <code>msg.topic</code> is set, it overrides the configured address.</dd>
+    If <code>msg.topic</code> is set, it overrides the configured address. For an address with a length
+    (<code>DB1,INT20.3</code>), send an array of that many values, or a <code>Buffer</code> for a byte array.</dd>
     <dt>Multi-write</dt>
     <dd>Writes multiple values at once. <code>msg.payload</code> must be an object where each key is an S7 address and each value is the data to write.
     <pre>{"MB0": 255, "MW2": 1234, "DB1,REAL0": 23.5}</pre></dd>

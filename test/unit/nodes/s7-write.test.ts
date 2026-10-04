@@ -133,6 +133,30 @@ describe('s7-write node', () => {
       expect(done).toHaveBeenCalledWith();
     });
 
+    it('passes an array or Buffer on to an address with a length', async () => {
+      for (const payload of [[1, 2, 3, 4], Buffer.from([1, 2, 3, 4])]) {
+        const node = createNodeContext();
+        constructorFn.call(node, { id: 'write1', type: 's7-write', server: 'config1', address: 'DB1,BYTE10.4' });
+        const done = jest.fn();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (node as any).listeners('input')[0]({ _msgid: '1', payload }, jest.fn(), done);
+        expect(done).toHaveBeenCalledWith();
+        expect(mockBackend.writeCalls[mockBackend.writeCalls.length - 1][0].value).toBe(payload);
+      }
+    });
+
+    it('refuses an array for an address without a length', async () => {
+      const node = createNodeContext();
+      constructorFn.call(node, { id: 'write1', type: 's7-write', server: 'config1', address: 'DB1,BYTE10' });
+      const done = jest.fn();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (node as any).listeners('input')[0]({ _msgid: '1', payload: [1, 2] }, jest.fn(), done);
+      expect(done.mock.calls[0][0].message).toBe(
+        'An array or Buffer needs an address with a length, e.g. DB1,BYTE0.4 (got DB1,BYTE10)',
+      );
+      expect(mockBackend.writeCalls).toHaveLength(0);
+    });
+
     it('uses msg.topic as address when provided', async () => {
       const node = createNodeContext();
       constructorFn.call(node, {
