@@ -188,6 +188,70 @@ describe('Poller', () => {
     poller.start();
   });
 
+  describe('a read still in flight when the poller stops', () => {
+    // poll() is private; call it directly so the read can be settled after stop()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const poll = (p: Poller): Promise<void> => (p as any).poll();
+    const pendingRead = (p: Poller) => {
+      const read: { resolve: (m: Map<string, unknown>) => void; reject: (e: Error) => void } = {} as never;
+      p.setReadFunction(() => new Promise((resolve, reject) => Object.assign(read, { resolve, reject })));
+      return read;
+    };
+
+    it('does not emit error, so a closed s7-trigger with no listeners cannot crash the process', async () => {
+      poller = new Poller({ interval: 1000, edgeMode: 'any', deadband: 0 });
+      poller.addItem('test');
+      const read = pendingRead(poller);
+      poller.on('error', () => undefined);
+      poller.start();
+      const polling = poll(poller);
+      // What s7-trigger's close does, then the connection rejecting the queued read
+      poller.stop();
+      poller.removeAllListeners();
+      const emit = jest.spyOn(poller, 'emit');
+      read.reject(new Error('Connection lost'));
+      await expect(polling).resolves.toBeUndefined();
+      expect(emit).not.toHaveBeenCalled();
+    });
+
+    it('ignores its values, even after the poller has started again', async () => {
+      poller = new Poller({ interval: 1000, edgeMode: 'any', deadband: 0 });
+      poller.addItem('test');
+      const read = pendingRead(poller);
+      const changed = jest.fn();
+      poller.on('changed', changed);
+      poller.start();
+      const stale = poll(poller);
+      poller.stop();
+      poller.start();
+      read.resolve(new Map([['test', 1]]));
+      await stale;
+      expect(changed).not.toHaveBeenCalled();
+
+      // A read from the new run is used as usual
+      const fresh = pendingRead(poller);
+      const current = poll(poller);
+      fresh.resolve(new Map([['test', 2]]));
+      await current;
+      expect(changed).toHaveBeenCalledWith({ name: 'test', value: 2, oldValue: undefined });
+    });
+
+    it('still reports errors while running, and after an interval change', async () => {
+      poller = new Poller({ interval: 1000, edgeMode: 'any', deadband: 0 });
+      poller.addItem('test');
+      const read = pendingRead(poller);
+      const onError = jest.fn();
+      poller.on('error', onError);
+      poller.start();
+      const polling = poll(poller);
+      // updateConfig restarts the timer but is not a stop, so the read still counts
+      poller.updateConfig({ interval: 500 });
+      read.reject(new Error('Read failed'));
+      await polling;
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'Read failed' }));
+    });
+  });
+
   it('can add and remove items', () => {
     poller = new Poller({ interval: 1000, edgeMode: 'any', deadband: 0 });
     poller.addItem('a');

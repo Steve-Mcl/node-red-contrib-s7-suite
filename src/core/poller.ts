@@ -21,6 +21,8 @@ export class Poller extends EventEmitter {
   private items: Map<string, PollerItem> = new Map();
   private config: PollerConfig;
   private readFn: (() => Promise<Map<string, unknown>>) | null = null;
+  // Bumped by stop(), so a read still in flight when the poller stops is ignored when it settles
+  private run = 0;
 
   constructor(config: PollerConfig) {
     super();
@@ -45,6 +47,7 @@ export class Poller extends EventEmitter {
   }
 
   stop(): void {
+    this.run++;
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
@@ -66,9 +69,11 @@ export class Poller extends EventEmitter {
 
   private async poll(): Promise<void> {
     if (!this.readFn) return;
+    const run = this.run;
 
     try {
       const values = await this.readFn();
+      if (run !== this.run) return;
       for (const [name, value] of values) {
         const item = this.items.get(name);
         if (!item) continue;
@@ -81,6 +86,10 @@ export class Poller extends EventEmitter {
         }
       }
     } catch (err) {
+      // After stop() the read usually fails because the connection is closing ("Connection
+      // lost"). s7-trigger removes its listeners on close, and an 'error' event with no listener
+      // throws, which would take Node-RED down.
+      if (run !== this.run) return;
       this.emit('error', err);
     }
   }

@@ -185,21 +185,29 @@ export class NodeS7Backend implements IS7Backend {
       return toResults({});
     }
 
+    // Keep the connection this read was sent on: disconnect() can drop it (this.conn = null)
+    // before nodes7's own timeout calls back, so the callback must not use this.conn
+    const conn = this.conn;
     for (const addr of addrList) {
-      this.conn.addItems(addr);
+      conn.addItems(addr);
     }
 
     const removeAll = (): void => {
       for (const addr of addrList) {
-        this.conn.removeItems(addr);
+        conn.removeItems(addr);
       }
     };
 
     return new Promise<S7ReadResult[]>((resolve, reject) => {
       try {
-        this.conn.readAllItems((err: unknown, values: Record<string, unknown>) => {
+        conn.readAllItems((err: unknown, values: Record<string, unknown>) => {
           removeAll();
 
+          // A late answer from a connection that has since been dropped or replaced
+          if (this.conn !== conn) {
+            reject(this.lostError('read'));
+            return;
+          }
           if (err && this.linkLost()) {
             reject(this.lostError('read'));
             return;
@@ -254,21 +262,27 @@ export class NodeS7Backend implements IS7Backend {
       }
     }
 
+    // Reading string headers above may have waited on the PLC, so check the link again, then keep
+    // the connection this write is sent on (see read())
+    this.assertConnected('write');
+    const conn = this.conn;
     for (const addr of names) {
-      this.conn.addItems(addr);
+      conn.addItems(addr);
     }
 
     const removeAll = (): void => {
       for (const name of names) {
-        this.conn.removeItems(name);
+        conn.removeItems(name);
       }
     };
 
     return new Promise<void>((resolve, reject) => {
       try {
-        this.conn.writeItems(names, values, (err: unknown) => {
+        conn.writeItems(names, values, (err: unknown) => {
           removeAll();
-          if (err && this.linkLost()) {
+          if (this.conn !== conn) {
+            reject(this.lostError('write'));
+          } else if (err && this.linkLost()) {
             reject(this.lostError('write'));
           } else if (err) {
             reject(new S7Error(S7ErrorCode.WRITE_FAILED, `nodes7 write failed: ${failureDetail(err, names)}`, causeOf(err)));
@@ -328,11 +342,17 @@ export class NodeS7Backend implements IS7Backend {
       addr = `${areaPrefix}B${start}.${length}`;
     }
 
-    this.conn.addItems(addr);
+    // Keep the connection this read is sent on (see read())
+    const conn = this.conn;
+    conn.addItems(addr);
 
     return new Promise<Buffer>((resolve, reject) => {
-      this.conn.readAllItems((err: unknown, values: Record<string, unknown>) => {
-        this.conn.removeItems(addr);
+      conn.readAllItems((err: unknown, values: Record<string, unknown>) => {
+        conn.removeItems(addr);
+        if (this.conn !== conn) {
+          reject(this.lostError('read'));
+          return;
+        }
         if (err && this.linkLost()) {
           reject(this.lostError('read'));
           return;
