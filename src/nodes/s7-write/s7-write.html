@@ -344,14 +344,28 @@
     Choosing <code>msg</code> starts from <code>msg.schema</code>.</dd>
     <dt class="optional">action <span class="property-type">string</span></dt>
     <dd>With <b>Dynamic control</b> on in the <code>s7-config</code>: <code>connect</code>, <code>disconnect</code>,
-    <code>reconnect</code> or <code>status</code>. The message then acts on the connection instead of writing;
-    <code>status</code> sends the connection report as <code>msg.payload</code>. See the <code>s7-config</code> help.
+    <code>reconnect</code> or <code>status</code>. The message then acts on the connection instead of writing.
+    When it has finished, the message is sent on with the connection report as <code>msg.payload</code> and the action as <code>msg.s7.op</code>. See the <code>s7-config</code> help.
     Ignored while Dynamic control is off.</dd>
   </dl>
   <h3>Outputs</h3>
   <dl class="message-properties">
     <dt>payload <span class="property-type">any</span></dt>
     <dd>Pass-through of the input message on successful write</dd>
+    <dt>s7 <span class="property-type">object</span></dt>
+    <dd>What was written, for routing and logging:
+      <ul>
+        <li><code>op</code>: <code>"write"</code></li>
+        <li><code>server</code>: the <code>s7-config</code>'s name, or host:port when it has none</li>
+        <li><code>source</code>: <code>"config"</code> for the address set in this node,
+        <code>"msg.payload"</code> in Multi-write, otherwise the property it came from, such as
+        <code>"msg.topic"</code></li>
+        <li><code>address</code>: the address, when one was written (the base address in Struct write)</li>
+        <li><code>addresses</code>: in Multi-write, each address in <code>msg.payload</code></li>
+        <li><code>timestamp</code>: when the message was sent, ms since 1970</li>
+        <li><code>durationMs</code>: from the message arriving to it being sent</li>
+      </ul>
+    Any <code>msg.s7</code> on the input message is replaced. Nothing is sent when the write fails.</dd>
   </dl>
   <h3>Write Modes</h3>
   <dl>

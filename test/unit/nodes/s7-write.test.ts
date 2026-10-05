@@ -34,8 +34,14 @@ describe('s7-write node', () => {
       host: '192.168.1.100', port: 102, rack: 0, slot: 1,
       plcType: 'S7-1200', backend: 'nodes7',
     });
-    return { connectionManager: connManager, registerChildNode: jest.fn(), deregisterChildNode: jest.fn() };
+    return { name: 'PLC 1', connectionManager: connManager, registerChildNode: jest.fn(), deregisterChildNode: jest.fn() };
   }
+
+  // The input message passed on, with msg.s7 for a write
+  const written = (msg: object, details: Record<string, unknown>) => ({
+    ...msg,
+    s7: { op: 'write', server: 'PLC 1', ...details, timestamp: expect.any(Number), durationMs: expect.any(Number) },
+  });
 
   function createNodeContext() {
     return Object.assign(new EventEmitter(), {
@@ -136,7 +142,7 @@ describe('s7-write node', () => {
 
       expect(mockBackend.writeCalls).toHaveLength(1);
       expect(mockBackend.writeCalls[0][0].value).toBe(42.5);
-      expect(send).toHaveBeenCalledWith(msg);
+      expect(send).toHaveBeenCalledWith(written(msg, { source: 'config', address: 'DB1,REAL0' }));
       expect(done).toHaveBeenCalledWith();
     });
 
@@ -174,7 +180,12 @@ describe('s7-write node', () => {
       await (node as any).listeners('input')[0]({ _msgid: '1', action: 'disconnect', payload: 1.5 }, send, done);
       expect(connManager.getState()).toBe('disconnected');
       expect(mockBackend.writeCalls).toHaveLength(0);
-      expect(send).not.toHaveBeenCalled();
+      // Sent on once disconnected, with the report and msg.s7 but without msg.action
+      expect(send).toHaveBeenCalledWith({
+        _msgid: '1',
+        payload: expect.objectContaining({ state: 'disconnected' }),
+        s7: { op: 'disconnect', server: 'PLC 1', timestamp: expect.any(Number), durationMs: expect.any(Number) },
+      });
       expect(done).toHaveBeenCalledWith();
     });
 
@@ -207,6 +218,46 @@ describe('s7-write node', () => {
       expect(mockBackend.writeCalls.map((c: Array<{ address: { dataType: string } }>) => c[0].address.dataType))
         .toEqual(['INT', 'DINT']);
       delete process.env.S7_TEST_ADDRESS;
+    });
+
+    it('says in msg.s7 which address it wrote and where that came from', async () => {
+      process.env.S7_TEST_ADDRESS = 'DB1,DINT8';
+      for (const [addressType, address, msg, expected] of [
+        ['msg', 'topic', { _msgid: '1', payload: 10, topic: 'DB1,INT0' }, { source: 'msg.topic', address: 'DB1,INT0' }],
+        ['env', 'S7_TEST_ADDRESS', { _msgid: '2', payload: 10 }, { source: 'env.S7_TEST_ADDRESS', address: 'DB1,DINT8' }],
+      ] as const) {
+        const node = createNodeContext();
+        constructorFn.call(node, { id: 'write1', type: 's7-write', server: 'config1', address, addressType });
+        const send = jest.fn();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (node as any).listeners('input')[0](msg, send, jest.fn());
+        expect(send).toHaveBeenCalledWith(written(msg, expected));
+      }
+      delete process.env.S7_TEST_ADDRESS;
+    });
+
+    it('replaces a msg.s7 that came in with the message', async () => {
+      const node = createNodeContext();
+      constructorFn.call(node, { id: 'write1', type: 's7-write', server: 'config1', address: 'DB1,REAL0' });
+      const send = jest.fn();
+      const msg = { _msgid: '1', payload: 1.5, s7: { op: 'read', address: 'DB9,INT0', extra: true } };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (node as any).listeners('input')[0](msg, send, jest.fn());
+      expect(send).toHaveBeenCalledWith(written(msg, { source: 'config', address: 'DB1,REAL0' }));
+      // The caller's message is left as it was
+      expect(msg.s7).toEqual({ op: 'read', address: 'DB9,INT0', extra: true });
+    });
+
+    it('sends nothing, and so no msg.s7, when the write fails', async () => {
+      mockBackend.shouldFailWrite = true;
+      const node = createNodeContext();
+      constructorFn.call(node, { id: 'write1', type: 's7-write', server: 'config1', address: 'DB1,REAL0' });
+      const send = jest.fn();
+      const done = jest.fn();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (node as any).listeners('input')[0]({ _msgid: '1', payload: 1.5 }, send, done);
+      expect(send).not.toHaveBeenCalled();
+      expect(done.mock.calls[0][0]).toBeInstanceOf(Error);
     });
 
     it('refuses an address source that is not a string', async () => {
@@ -289,7 +340,7 @@ describe('s7-write node', () => {
       const inputHandler = (node as any).listeners('input')[0];
       await inputHandler(msg, null, done);
 
-      expect(node.send).toHaveBeenCalledWith(msg);
+      expect(node.send).toHaveBeenCalledWith(written(msg, { source: 'config', address: 'DB1,REAL0' }));
       expect(done).toHaveBeenCalledWith();
     });
 
@@ -375,8 +426,23 @@ describe('s7-write node', () => {
         expect(mockBackend.writeCalls[0]).toHaveLength(2);
         expect(mockBackend.writeCalls[0][0].value).toBe(42.5);
         expect(mockBackend.writeCalls[0][1].value).toBe(100);
-        expect(send).toHaveBeenCalledWith(msg);
+        expect(send).toHaveBeenCalledWith(written(msg, {
+          source: 'msg.payload',
+          addresses: { 'DB1,REAL0': 'DB1,REAL0', 'DB1,INT4': 'DB1,INT4' },
+        }));
         expect(done).toHaveBeenCalledWith();
+      });
+
+      it('sets msg.s7.address too when the payload has one address', async () => {
+        const node = createNodeContext();
+        constructorFn.call(node, { id: 'write1', type: 's7-write', server: 'config1', address: '', mode: 'multi' });
+        const msg = { _msgid: '1', payload: { 'DB1,INT4': 7 } };
+        const send = jest.fn();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (node as any).listeners('input')[0](msg, send, jest.fn());
+        expect(send).toHaveBeenCalledWith(written(msg, {
+          source: 'msg.payload', address: 'DB1,INT4', addresses: { 'DB1,INT4': 'DB1,INT4' },
+        }));
       });
 
       it('errors when payload is a string', async () => {
@@ -534,7 +600,7 @@ describe('s7-write node', () => {
         expect(mockBackend.rawReadCalls).toHaveLength(1);
         expect(mockBackend.writeCalls).toHaveLength(1);
         expect(mockBackend.writeCalls[0]).toHaveLength(2);
-        expect(send).toHaveBeenCalledWith(msg);
+        expect(send).toHaveBeenCalledWith(written(msg, { source: 'config', address: 'DB1,BYTE0' }));
         expect(done).toHaveBeenCalledWith();
       });
 
@@ -591,7 +657,7 @@ describe('s7-write node', () => {
 
         // Should have read from DB2
         expect(mockBackend.rawReadCalls[0].dbNumber).toBe(2);
-        expect(send).toHaveBeenCalledWith(msg);
+        expect(send).toHaveBeenCalledWith(written(msg, { source: 'msg.topic', address: 'DB2,BYTE0' }));
         expect(done).toHaveBeenCalledWith();
       });
 

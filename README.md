@@ -119,7 +119,9 @@ A message carrying `msg.action` acts on the connection and does **no** PLC I/O:
 | `connect` | Connects. Already connected is a success; a pending retry is brought forward |
 | `disconnect` | Disconnects and stops retrying until told to connect |
 | `reconnect` | Disconnects, then connects with the retry backoff reset |
-| `status` | Sends the message on with `msg.payload` set to the connection report (below) |
+| `status` | Changes nothing, just reports |
+
+When the action has finished, the node sends the message on, without `msg.action`, with `msg.payload` set to the connection report as it is then (below) and `msg.s7` set to `{ op, server, timestamp, durationMs }`, where `op` is the action. So a flow can wait for a `connect` to finish, then carry on.
 
 ```json
 {
@@ -131,7 +133,34 @@ A message carrying `msg.action` acts on the connection and does **no** PLC I/O:
 }
 ```
 
-`state` is `connected`, `connecting`, `reconnecting`, `error` or `disconnected`, and `since` is when it entered that state. `lastError` is the most recent connect failure or lost link, kept after the connection recovers. The action affects the connection, so every node using that `s7-config` sees the result. A failed `connect` or `reconnect`, or an unknown action, is reported as the node's error, so a Catch node can handle it.
+`state` is `connected`, `connecting`, `reconnecting`, `error` or `disconnected`, and `since` is when it entered that state. `lastError` is the most recent connect failure or lost link, kept after the connection recovers. The action affects the connection, so every node using that `s7-config` sees the result. A failed `connect` or `reconnect`, or an unknown action, is reported as the node's error, so a Catch node can handle it, and nothing is sent.
+
+### Output details (`msg.s7`)
+
+`s7-read`, `s7-write` and `s7-trigger` add `msg.s7` to every message they send, with the same shape on each, so a switch, log or database node can use it whatever S7 node the message came from:
+
+```json
+{
+  "op": "read",
+  "server": "Line 1 PLC",
+  "source": "flow.plc.addresses",
+  "addresses": { "speed": "DB1,INT0", "temp": "DB1,REAL4" },
+  "timestamp": 1791100000000,
+  "durationMs": 12
+}
+```
+
+| Property | Description |
+|---|---|
+| `op` | `read`, `write` or `trigger`, or the `msg.action` that ran (`connect`, `disconnect`, `reconnect`, `status`) |
+| `server` | The `s7-config`'s name, or `host:port` when it has none |
+| `source` | Where the address came from: `config` (set in the node), `msg.payload` (`s7-write` multi-write), or the property, such as `flow.plc.addresses` or `env.PLC_ADDRESS` |
+| `address` | The address, when one was read or written (the base address for struct mode) |
+| `addresses` | When `msg.payload` is keyed by label or address (`s7-read` object output or several addresses, `s7-write` multi-write), the same keys, each with its address |
+| `timestamp` | When the message was sent, in ms since 1970 |
+| `durationMs` | From the message arriving to it being sent. For `s7-trigger`, from the start of the poll that saw the change |
+
+A property that doesn't apply is left out. Any `msg.s7` on the input message is replaced. Action replies have only `op`, `server`, `timestamp` and `durationMs`.
 
 ### Node API
 
@@ -144,6 +173,7 @@ Any message triggers a read. The node reads the addresses and schema set in it; 
 | Address src | `msg` / `flow` / `global` / `env` | An address string (space- or semicolon-separated), an array of addresses, or `{ label: address }`, whose labels become the output keys |
 | Schema | `msg` / `flow` / `global` | The struct schema, as an array or a JSON string (struct mode only) |
 | `msg.payload` | any | Output: read value(s) |
+| `msg.s7` | object | Output: what was read, where the address came from, and timing ([Output details](#output-details-msgs7)) |
 
 **Output modes:**
 - **single** — `msg.payload` = single value (or object if multiple addresses)
@@ -166,7 +196,7 @@ The node writes to the address and with the schema set in it; nothing else in th
 | Schema | `msg` / `flow` / `global` | The struct schema, as an array or a JSON string (struct mode only) |
 | `msg.payload` | any | Value to write (type must match address data type). For an address with a length (`DB1,INT20.3`), an array of that many values, or a `Buffer` for a byte array |
 
-On success, the input message is passed through to the output.
+On success, the input message is passed through to the output, with `msg.s7` saying what was written ([Output details](#output-details-msgs7)).
 
 #### s7-trigger
 
@@ -180,6 +210,7 @@ The node has no input: it starts polling once the PLC is connected, and is confi
 | `msg.payload` | any | Output: new value |
 | `msg.topic` | string | Output: address that changed |
 | `msg.oldValue` | any | Output: previous value |
+| `msg.s7` | object | Output: the address that changed and timing ([Output details](#output-details-msgs7)) |
 
 #### s7-browse
 

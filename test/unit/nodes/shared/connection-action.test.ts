@@ -18,6 +18,7 @@ describe('handleConnectionAction', () => {
       reconnectInterval: 10000, healthCheckInterval: 0,
     });
     serverNode = {
+      name: 'Line 1 PLC',
       connectionManager: connection,
       allowDynamic,
       configError,
@@ -26,6 +27,10 @@ describe('handleConnectionAction', () => {
     send = jest.fn();
     done = jest.fn();
   };
+  // msg.s7 on an action's reply
+  const details = (op: string) => ({
+    op, server: 'Line 1 PLC', timestamp: expect.any(Number), durationMs: expect.any(Number),
+  });
   const run = (msg: Record<string, unknown>) =>
     handleConnectionAction(serverNode, msg as NodeMessage, send, done);
 
@@ -65,6 +70,7 @@ describe('handleConnectionAction', () => {
     expect(send).toHaveBeenCalledWith({
       topic: 'line1',
       payload: expect.objectContaining({ state: 'connected', host: '10.0.0.1' }),
+      s7: details('status'),
     });
     expect(done).toHaveBeenCalledWith();
     expect(backend.readCalls).toHaveLength(0);
@@ -77,14 +83,34 @@ describe('handleConnectionAction', () => {
     await run({ action: 'connect' });
     expect(backend.connectCalls).toHaveLength(1);
     expect(done.mock.calls).toEqual([[], []]);
-    expect(send).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledTimes(2);
   });
 
-  it('reports a failed connect as the error', async () => {
+  it('sends the message on once connected, with the report as it is then', async () => {
+    make(true);
+    await run({ action: 'connect', topic: 'line1', payload: 'x' });
+    expect(send).toHaveBeenCalledWith({
+      topic: 'line1',
+      payload: expect.objectContaining({ state: 'connected' }),
+      s7: details('connect'),
+    });
+  });
+
+  it('times the action', async () => {
+    make(true);
+    const now = jest.spyOn(Date, 'now');
+    now.mockReturnValueOnce(5000).mockReturnValue(5030);
+    await run({ action: 'reconnect' });
+    now.mockRestore();
+    expect(send.mock.calls[0][0].s7).toMatchObject({ op: 'reconnect', timestamp: 5030, durationMs: 30 });
+  });
+
+  it('reports a failed connect as the error, and sends nothing', async () => {
     make(true);
     backend.shouldFailConnect = true;
     await run({ action: 'connect' });
     expect(done.mock.calls[0][0].message).toBe('Connection failed');
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('disconnect disconnects and stops retrying', async () => {
@@ -92,6 +118,10 @@ describe('handleConnectionAction', () => {
     await connection.connect();
     await run({ action: 'disconnect' });
     expect(connection.getState()).toBe('disconnected');
+    expect(send).toHaveBeenCalledWith({
+      payload: expect.objectContaining({ state: 'disconnected' }),
+      s7: details('disconnect'),
+    });
     expect(done).toHaveBeenCalledWith();
   });
 
@@ -101,7 +131,18 @@ describe('handleConnectionAction', () => {
     await run({ action: 'reconnect' });
     expect(connection.getState()).toBe('connected');
     expect(backend.connectCalls).toHaveLength(2);
+    expect(send).toHaveBeenCalledWith({
+      payload: expect.objectContaining({ state: 'connected' }),
+      s7: details('reconnect'),
+    });
     expect(done).toHaveBeenCalledWith();
+  });
+
+  it('names the server by host and port when the s7-config has no name', async () => {
+    make(true);
+    Object.assign(serverNode, { name: '', s7Config: { host: '10.0.0.1', port: 102 } });
+    await run({ action: 'status' });
+    expect(send.mock.calls[0][0].s7.server).toBe('10.0.0.1:102');
   });
 
   it('refuses to connect with settings that cannot be used', async () => {

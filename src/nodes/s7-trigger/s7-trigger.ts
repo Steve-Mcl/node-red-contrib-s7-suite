@@ -4,6 +4,7 @@ import { parseAddress, toNodes7Address, splitAddresses } from '../../core/addres
 import { Poller, EdgeMode } from '../../core/poller';
 import { S7ReadItem, S7ReadResult } from '../../types/s7-address';
 import { statusForState } from '../shared/status-helper';
+import { s7Details } from '../shared/msg-details';
 
 interface S7TriggerNodeDef extends NodeDef {
   server: string;
@@ -92,7 +93,11 @@ export = function (RED: NodeAPI): void {
       poller.addItem(item.name);
     }
 
+    // When the current poll started, so msg.s7.durationMs covers the read that saw the change
+    let pollStarted = Date.now();
+
     poller.setReadFunction(async () => {
+      pollStarted = Date.now();
       const results: S7ReadResult[] = await serverNode.connectionManager.read(items);
       const map = new Map<string, unknown>();
       for (const r of results) {
@@ -110,6 +115,7 @@ export = function (RED: NodeAPI): void {
         _msgid: '',
       };
       (msg as Record<string, unknown>).oldValue = oldValue;
+      (msg as Record<string, unknown>).s7 = s7Details(serverNode, 'trigger', pollStarted, { source: 'config', address: addr });
       this.send(msg);
     });
 

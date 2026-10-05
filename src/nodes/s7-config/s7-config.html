@@ -567,16 +567,18 @@
         brought forward.</li>
         <li><code>disconnect</code>: disconnect, and don't retry until told to connect.</li>
         <li><code>reconnect</code>: disconnect then connect, with the retry backoff reset.</li>
-        <li><code>status</code>: send the message on with <code>msg.payload</code> set to the
-        connection report: <code>state</code> (<code>connected</code>, <code>connecting</code>,
-        <code>reconnecting</code>, <code>error</code> or <code>disconnected</code>), <code>since</code>
-        (when it entered that state, ms since 1970), <code>lastError</code> and
-        <code>lastErrorAt</code>, <code>configError</code>, and the backend, host, port, rack, slot and
-        PLC type.</li>
+        <li><code>status</code>: change nothing, just report.</li>
       </ul>
+    When the action has finished, the node sends the message on without <code>msg.action</code>, with
+    <code>msg.payload</code> set to the connection report as it is then: <code>state</code>
+    (<code>connected</code>, <code>connecting</code>, <code>reconnecting</code>, <code>error</code> or
+    <code>disconnected</code>), <code>since</code> (when it entered that state, ms since 1970),
+    <code>lastError</code> and <code>lastErrorAt</code>, <code>configError</code>, and the backend, host,
+    port, rack, slot and PLC type. <code>msg.s7</code> holds <code>op</code> (the action),
+    <code>server</code>, <code>timestamp</code> and <code>durationMs</code>, as on a read or write.
     The action acts on the connection, so every node using this <code>s7-config</code> sees the result.
     A failed <code>connect</code> or <code>reconnect</code> is reported as the node's error, so a
-    Catch node can handle it. Other values of <code>msg.action</code> are an error.</dd>
+    Catch node can handle it, and nothing is sent. Other values of <code>msg.action</code> are an error.</dd>
     <dt>Debug logging <span class="property-type">boolean</span></dt>
     <dd>When enabled, the <code>nodes7</code> backend prints raw protocol trace
     output (every read/poll cycle) to stdout. Disabled by default to avoid

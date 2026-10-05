@@ -31,7 +31,7 @@ describe('s7-trigger node', () => {
       host: '192.168.1.100', port: 102, rack: 0, slot: 1,
       plcType: 'S7-1200', backend: 'nodes7',
     });
-    return { connectionManager: connManager, registerChildNode: jest.fn(), deregisterChildNode: jest.fn() };
+    return { name: 'PLC 1', connectionManager: connManager, registerChildNode: jest.fn(), deregisterChildNode: jest.fn() };
   }
 
   function createNodeContext() {
@@ -253,6 +253,31 @@ describe('s7-trigger node', () => {
       if (closeListeners.length > 0) {
         closeListeners[0](() => {});
       }
+    });
+
+    it('says in msg.s7 which address changed, keeping msg.oldValue', async () => {
+      jest.useRealTimers();
+      mockBackend.readValues = { item_0: 10, item_1: 20 };
+
+      const node = createNodeContext();
+      constructorFn.call(node, {
+        id: 'trigger1', type: 's7-trigger', server: 'config1', address: 'DB1,REAL0 DB1,INT4',
+        interval: 50, edgeMode: 'any', deadband: 0,
+      });
+      await new Promise(resolve => setTimeout(resolve, 150));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (node as any).listeners('close')[0](() => {});
+
+      const sent = node.send.mock.calls.map((c: Array<Record<string, unknown>>) => c[0]);
+      expect(sent).toHaveLength(2);
+      const details = (address: string) => ({
+        op: 'trigger', server: 'PLC 1', source: 'config', address,
+        timestamp: expect.any(Number), durationMs: expect.any(Number),
+      });
+      expect(sent[0]).toMatchObject({ topic: 'DB1,REAL0', payload: 10, oldValue: undefined, s7: details('DB1,REAL0') });
+      expect(sent[1]).toMatchObject({ topic: 'DB1,INT4', payload: 20, s7: details('DB1,INT4') });
+      expect('oldValue' in sent[0]).toBe(true);
+      expect(sent[0].s7).toEqual(details('DB1,REAL0'));
     });
 
     it('stops poller on reconnecting state', () => {
