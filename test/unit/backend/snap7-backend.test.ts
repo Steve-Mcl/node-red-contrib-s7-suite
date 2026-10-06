@@ -711,6 +711,23 @@ describe('Snap7Backend', () => {
       expect(backend.isConnected()).toBe(true);
     });
 
+    // Seen on a real S7-1200: a read in flight during a reconnect failed on the old client about
+    // 3 s later ("Connection timed out"), marked the new connection down, and every request on it
+    // was then refused with "Not connected"
+    it('does not let a late link error from a replaced client mark the new connection down', async () => {
+      const pending: { cb?: Function } = {};
+      mockReadArea.mockImplementationOnce(
+        (_a: unknown, _d: unknown, _s: unknown, _l: unknown, _w: unknown, cb: Function) => { pending.cb = cb; },
+      );
+      const reading = backend.read([item]);
+      await backend.connect({ host: '192.168.1.100', port: 102, rack: 0, slot: 1, plcType: 'S7-1200', backend: 'snap7' });
+
+      pending.cb!(LINK_RESET);
+      // Not DISCONNECTED, so the connection manager doesn't tear down the new connection either
+      await expect(reading).resolves.toMatchObject([{ quality: 'bad', error: expect.stringContaining('ISO : link gone') }]);
+      expect(backend.isConnected()).toBe(true);
+    });
+
     it('disconnects the old client before reconnecting', async () => {
       await backend.connect({ host: '192.168.1.100', port: 102, rack: 0, slot: 1, plcType: 'S7-1200', backend: 'snap7' });
       expect(mockDisconnect).toHaveBeenCalledTimes(1);
