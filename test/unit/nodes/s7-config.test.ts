@@ -901,6 +901,10 @@ describe('s7-config node', () => {
       expect(nodeContext.error).toHaveBeenCalledWith(
         expect.stringContaining('Connection failed'),
       );
+
+      // The failed connect schedules retries; close the node so the retry timer doesn't keep
+      // the test process alive
+      await new Promise((resolve) => nodeContext.emit('close', resolve));
     });
   });
 });
