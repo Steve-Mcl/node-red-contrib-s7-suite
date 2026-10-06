@@ -572,11 +572,16 @@
         <code>reconnecting</code>, <code>error</code> or <code>disconnected</code>), <code>since</code>
         (when it entered that state, ms since 1970), <code>lastError</code> and
         <code>lastErrorAt</code>, <code>configError</code>, and the backend, host, port, rack, slot and
-        PLC type.</li>
+        PLC type. <code>msg.s7</code> holds <code>op</code> (<code>"status"</code>), <code>server</code>,
+        <code>timestamp</code> and <code>durationMs</code>, as on a read or write. Wire the reply to a
+        debug or switch node rather than straight into another S7 node, which would treat it as an
+        ordinary message to read or write with.</li>
       </ul>
     The action acts on the connection, so every node using this <code>s7-config</code> sees the result.
-    A failed <code>connect</code> or <code>reconnect</code> is reported as the node's error, so a
-    Catch node can handle it. Other values of <code>msg.action</code> are an error.</dd>
+    <code>connect</code>, <code>disconnect</code> and <code>reconnect</code> send nothing on: to carry
+    on once one has finished, use a Complete node. A failed <code>connect</code> or
+    <code>reconnect</code> is reported as the node's error, so a Catch node can handle it. Other values
+    of <code>msg.action</code> are an error.</dd>
     <dt>Debug logging <span class="property-type">boolean</span></dt>
     <dd>When enabled, the <code>nodes7</code> backend prints raw protocol trace
     output (every read/poll cycle) to stdout. Disabled by default to avoid

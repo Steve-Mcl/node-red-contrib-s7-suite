@@ -34,8 +34,13 @@ describe('s7-read node', () => {
       host: '192.168.1.100', port: 102, rack: 0, slot: 1,
       plcType: 'S7-1200', backend: 'nodes7',
     });
-    return { connectionManager: connManager, registerChildNode: jest.fn(), deregisterChildNode: jest.fn() };
+    return { name: 'PLC 1', connectionManager: connManager, registerChildNode: jest.fn(), deregisterChildNode: jest.fn() };
   }
+
+  // msg.s7 for a read
+  const readDetails = (details: Record<string, unknown>) => ({
+    op: 'read', server: 'PLC 1', ...details, timestamp: expect.any(Number), durationMs: expect.any(Number),
+  });
 
   function createNodeContext() {
     return Object.assign(new EventEmitter(), {
@@ -160,9 +165,95 @@ describe('s7-read node', () => {
       const done = jest.fn();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (node as any).listeners('input')[0]({ _msgid: '1', action: 'status' }, send, done);
-      expect(send).toHaveBeenCalledWith({ _msgid: '1', payload: expect.objectContaining({ state: 'connected' }) });
+      expect(send).toHaveBeenCalledWith({
+        _msgid: '1',
+        payload: expect.objectContaining({ state: 'connected' }),
+        s7: { op: 'status', server: 'PLC 1', timestamp: expect.any(Number), durationMs: expect.any(Number) },
+      });
       expect(mockBackend.readCalls).toHaveLength(0);
       expect(done).toHaveBeenCalledWith();
+    });
+
+    describe('msg.s7', () => {
+      const read = async (config: Record<string, unknown>, msg: Record<string, unknown> = { _msgid: '1' }) => {
+        const node = createNodeContext();
+        constructorFn.call(node, { id: 'read1', type: 's7-read', server: 'config1', ...config });
+        const send = jest.fn();
+        const done = jest.fn();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (node as any).listeners('input')[0](msg, send, done);
+        expect(done).toHaveBeenCalledWith();
+        return send.mock.calls[0][0];
+      };
+
+      it('names the address and server for a single read', async () => {
+        mockBackend.readValues = { item_0: 42.5 };
+        const out = await read({ address: 'DB1,REAL0', outputMode: 'single' });
+        expect(out.s7).toEqual(readDetails({ source: 'config', address: 'DB1,REAL0' }));
+      });
+
+      it('keys msg.s7.addresses like the payload for several addresses', async () => {
+        mockBackend.readValues = { item_0: 10, item_1: 20 };
+        const out = await read({
+          address: 'DB1,REAL0 DB1,REAL4', labels: JSON.stringify({ 'DB1,REAL4': 'temp' }), outputMode: 'single',
+        });
+        expect(out.payload).toEqual({ 'DB1,REAL0': 10, temp: 20 });
+        expect(out.s7).toEqual(readDetails({
+          source: 'config', addresses: { 'DB1,REAL0': 'DB1,REAL0', temp: 'DB1,REAL4' },
+        }));
+      });
+
+      it('gives address and addresses for object output of one address', async () => {
+        mockBackend.readValues = { item_0: 55 };
+        const out = await read({ address: 'DB1,REAL0', outputMode: 'object' });
+        expect(out.s7).toEqual(readDetails({
+          source: 'config', address: 'DB1,REAL0', addresses: { 'DB1,REAL0': 'DB1,REAL0' },
+        }));
+      });
+
+      it('names the property the addresses came from', async () => {
+        mockBackend.readValues = { item_0: 1, item_1: 2 };
+        const out = await read(
+          { address: '', outputMode: 'object', addressType: 'msg', addressProp: 'request.addresses' },
+          { _msgid: '1', request: { addresses: { speed: 'DB1,INT0', count: 'DB1,INT2' } } },
+        );
+        expect(out.s7).toEqual(readDetails({
+          source: 'msg.request.addresses', addresses: { speed: 'DB1,INT0', count: 'DB1,INT2' },
+        }));
+
+        process.env.S7_TEST_READ_ADDRESS = 'DB1,INT4';
+        mockBackend.readValues = { item_0: 3 };
+        const fromEnv = await read({ address: '', outputMode: 'single', addressType: 'env', addressProp: 'S7_TEST_READ_ADDRESS' });
+        expect(fromEnv.s7).toEqual(readDetails({ source: 'env.S7_TEST_READ_ADDRESS', address: 'DB1,INT4' }));
+        delete process.env.S7_TEST_READ_ADDRESS;
+      });
+
+      it('names the address for buffer, bits and struct output', async () => {
+        mockBackend.rawAreaData.set('132:1:0:2', Buffer.from([1, 2]));
+        for (const outputMode of ['buffer', 'bits']) {
+          const out = await read({ address: 'DB1,BYTE0.0.2', outputMode });
+          expect(out.s7).toEqual(readDetails({ source: 'config', address: 'DB1,BYTE0.0.2' }));
+        }
+        const out = await read({
+          address: 'DB1,BYTE0', outputMode: 'struct', schema: JSON.stringify([{ name: 'n', type: 'INT', offset: 0 }]),
+        });
+        expect(out.s7).toEqual(readDetails({ source: 'config', address: 'DB1,BYTE0' }));
+      });
+
+      it('replaces a msg.s7 that came in with the message', async () => {
+        mockBackend.readValues = { item_0: 1 };
+        const out = await read({ address: 'DB1,REAL0', outputMode: 'single' }, { _msgid: '1', s7: { op: 'write', x: 1 } });
+        expect(out.s7).toEqual(readDetails({ source: 'config', address: 'DB1,REAL0' }));
+      });
+
+      it('times the read from the message arriving to it being sent', async () => {
+        const now = jest.spyOn(Date, 'now');
+        now.mockReturnValueOnce(1000).mockReturnValue(1012);
+        mockBackend.readValues = { item_0: 1 };
+        const out = await read({ address: 'DB1,REAL0', outputMode: 'single' });
+        now.mockRestore();
+        expect(out.s7).toMatchObject({ timestamp: 1012, durationMs: 12 });
+      });
     });
 
     it('reads as usual when msg.action is set but Dynamic control is off', async () => {

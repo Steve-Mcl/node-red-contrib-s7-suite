@@ -120,6 +120,12 @@
     <dd>The address that changed</dd>
     <dt>oldValue <span class="property-type">any</span></dt>
     <dd>The previous value before the change</dd>
+    <dt>s7 <span class="property-type">object</span></dt>
+    <dd>The same details as <code>s7-read</code> and <code>s7-write</code> send: <code>op</code>
+    (<code>"trigger"</code>), <code>server</code> (the <code>s7-config</code>'s name, or host:port),
+    <code>source</code> (<code>"config"</code>), <code>address</code> (the address that changed, as in
+    <code>msg.topic</code>), <code>timestamp</code> (when the message was sent, ms since 1970) and
+    <code>durationMs</code> (from the start of the poll that saw the change).</dd>
   </dl>
   <h3>Details</h3>
   <p>The node polls the configured address at the specified interval and only sends

@@ -704,6 +704,20 @@
     <dd>The value read from the PLC (type depends on output mode). If some addresses can't be read (a
     wrong offset, a missing DB), the others are still sent, the failed ones as <code>null</code>, and the node
     logs a warning naming them. If none can be read, the node reports an error instead of sending.</dd>
+    <dt>s7 <span class="property-type">object</span></dt>
+    <dd>What was read, for routing and logging:
+      <ul>
+        <li><code>op</code>: <code>"read"</code></li>
+        <li><code>server</code>: the <code>s7-config</code>'s name, or host:port when it has none</li>
+        <li><code>source</code>: <code>"config"</code> for the addresses set in this node, otherwise the
+        property they came from, such as <code>"flow.plc.address"</code></li>
+        <li><code>address</code>: the address, when one was read</li>
+        <li><code>addresses</code>: when <code>msg.payload</code> is keyed by label or address (Object
+        output, or several addresses), the same keys, each with its address</li>
+        <li><code>timestamp</code>: when the message was sent, ms since 1970</li>
+        <li><code>durationMs</code>: from the message arriving to it being sent</li>
+      </ul>
+    Any <code>msg.s7</code> on the input message is replaced.</dd>
   </dl>
   <h3>Output Modes</h3>
   <dl>

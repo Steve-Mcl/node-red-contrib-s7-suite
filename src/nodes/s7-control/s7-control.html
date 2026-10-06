@@ -63,6 +63,11 @@
   <dl class="message-properties">
     <dt>payload <span class="property-type">object</span></dt>
     <dd>Result object with <code>action</code> and <code>success</code> properties</dd>
+    <dt>s7 <span class="property-type">object</span></dt>
+    <dd><code>op</code> (<code>"control"</code>), <code>server</code> (the <code>s7-config</code>'s name, or
+    host:port), <code>timestamp</code> (when the message was sent, ms since 1970) and
+    <code>durationMs</code>, the same details <code>s7-read</code> and <code>s7-write</code> send. Any
+    <code>msg.s7</code> on the input message is replaced.</dd>
   </dl>
   <h3>Details</h3>
   <p>This node sends CPU control commands to the PLC. The action can be configured in the node properties or overridden at runtime via <code>msg.payload</code>.</p>

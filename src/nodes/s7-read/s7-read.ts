@@ -6,6 +6,7 @@ import { readValue, byteLength } from '../../core/data-converter';
 import { createStatusUpdater } from '../shared/status-helper';
 import { AddressEntry, evaluateProperty, toAddressEntries } from '../shared/msg-source';
 import { handleConnectionAction } from '../shared/connection-action';
+import { S7MsgDetailsExtra, s7Details } from '../shared/msg-details';
 
 interface S7ReadNodeDef extends NodeDef {
   server: string;
@@ -57,6 +58,9 @@ export = function (RED: NodeAPI): void {
       return toAddressEntries(value, `${addressType}.${prop}`);
     };
 
+    // For msg.s7: "config" for this node's list, else the property the addresses came from
+    const source = addressType === 'config' ? 'config' : `${addressType}.${config.addressProp || ''}`;
+
     // buffer, bits and struct read one area, so they take exactly one address
     const singleAddress = (entries: AddressEntry[], mode: string): string => {
       if (entries.length === 0) throw new Error('No address specified');
@@ -66,16 +70,21 @@ export = function (RED: NodeAPI): void {
 
     this.on('input', async (msg: NodeMessage, _send, done) => {
       const send = _send || ((m: NodeMessage) => this.send(m));
+      const started = Date.now();
 
       // msg.action (with Dynamic control on) acts on the connection and does no PLC I/O
       if (await handleConnectionAction(serverNode, msg, send, done)) return;
+
+      // msg.s7 for this read, built as the message is sent
+      const details = (extra: S7MsgDetailsExtra) => s7Details(serverNode, 'read', started, { source, ...extra });
 
       try {
         const outputMode = config.outputMode || 'single';
         const entries = await resolveAddresses(msg);
 
         if (outputMode === 'buffer' || outputMode === 'bits') {
-          const parsed = parseAddress(singleAddress(entries, outputMode));
+          const address = singleAddress(entries, outputMode);
+          const parsed = parseAddress(address);
           const areaCode = AREA_CODE_MAP[parsed.area];
           if (areaCode === undefined) {
             done(new Error(`Unsupported area: ${parsed.area}`));
@@ -88,7 +97,7 @@ export = function (RED: NodeAPI): void {
           );
 
           if (outputMode === 'buffer') {
-            send({ ...msg, payload: buffer } as NodeMessage);
+            send({ ...msg, payload: buffer, s7: details({ address }) } as NodeMessage);
           } else {
             // bits mode: unpack each byte into boolean array (LSB first)
             const bits: boolean[] = [];
@@ -98,7 +107,7 @@ export = function (RED: NodeAPI): void {
                 bits.push((byte & (1 << bit)) !== 0);
               }
             }
-            send({ ...msg, payload: bits } as NodeMessage);
+            send({ ...msg, payload: bits, s7: details({ address }) } as NodeMessage);
           }
 
           done();
@@ -178,7 +187,7 @@ export = function (RED: NodeAPI): void {
             });
           }
 
-          send({ ...msg, payload: result } as NodeMessage);
+          send({ ...msg, payload: result, s7: details({ address: addressStr }) } as NodeMessage);
           done();
           return;
         }
@@ -214,15 +223,20 @@ export = function (RED: NodeAPI): void {
           this.warn(`Read failed, sent as null: ${failed.join(', ')}`);
         }
 
+        // One address is msg.s7.address; a keyed payload also gets msg.s7.addresses with the same keys
+        const address = addresses.length === 1 ? addresses[0] : undefined;
         if (outputMode === 'object' || addresses.length > 1) {
           // Keyed by label (from this node's list, or an object of { label: address }), else address
           const payload: Record<string, unknown> = {};
+          const keyed: Record<string, string> = {};
           for (let i = 0; i < results.length; i++) {
-            payload[entries[i].label || addresses[i]] = results[i].value;
+            const key = entries[i].label || addresses[i];
+            payload[key] = results[i].value;
+            keyed[key] = addresses[i];
           }
-          send({ ...msg, payload } as NodeMessage);
+          send({ ...msg, payload, s7: details({ address, addresses: keyed }) } as NodeMessage);
         } else {
-          send({ ...msg, payload: results[0]?.value ?? null } as NodeMessage);
+          send({ ...msg, payload: results[0]?.value ?? null, s7: details({ address }) } as NodeMessage);
         }
 
         done();

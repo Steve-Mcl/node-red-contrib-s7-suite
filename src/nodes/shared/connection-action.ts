@@ -1,5 +1,6 @@
 import { NodeMessage } from 'node-red';
 import { S7ConfigNode } from '../s7-config/s7-config-types';
+import { s7Details } from './msg-details';
 
 /** What msg.action can ask of the connection. */
 export const CONNECTION_ACTIONS = ['connect', 'disconnect', 'reconnect', 'status'] as const;
@@ -28,11 +29,16 @@ export async function handleConnectionAction(
     return true;
   }
 
+  const started = Date.now();
   const connection = serverNode.connectionManager;
   try {
     switch (action as ConnectionAction) {
       case 'status': {
-        const out: Record<string, unknown> = { ...msg, payload: serverNode.getStatus() };
+        const out: Record<string, unknown> = {
+          ...msg,
+          payload: serverNode.getStatus(),
+          s7: s7Details(serverNode, 'status', started),
+        };
         delete out.action;
         send(out as NodeMessage);
         break;

@@ -18,6 +18,7 @@ describe('handleConnectionAction', () => {
       reconnectInterval: 10000, healthCheckInterval: 0,
     });
     serverNode = {
+      name: 'Line 1 PLC',
       connectionManager: connection,
       allowDynamic,
       configError,
@@ -65,6 +66,7 @@ describe('handleConnectionAction', () => {
     expect(send).toHaveBeenCalledWith({
       topic: 'line1',
       payload: expect.objectContaining({ state: 'connected', host: '10.0.0.1' }),
+      s7: { op: 'status', server: 'Line 1 PLC', timestamp: expect.any(Number), durationMs: expect.any(Number) },
     });
     expect(done).toHaveBeenCalledWith();
     expect(backend.readCalls).toHaveLength(0);

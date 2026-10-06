@@ -6,6 +6,7 @@ import { writeValue, byteLength } from '../../core/data-converter';
 import { createStatusUpdater } from '../shared/status-helper';
 import { evaluateProperty } from '../shared/msg-source';
 import { handleConnectionAction } from '../shared/connection-action';
+import { S7MsgDetailsExtra, s7Details } from '../shared/msg-details';
 
 interface S7WriteNodeDef extends NodeDef {
   server: string;
@@ -53,11 +54,19 @@ export = function (RED: NodeAPI): void {
       return value.trim();
     };
 
+    // For msg.s7: "config" for the address typed into this node, else the property it came from
+    const source = addressType === 'str' ? 'config' : `${addressType}.${config.address || ''}`;
+
     this.on('input', async (msg: NodeMessage, _send, done) => {
       const send = _send || ((m: NodeMessage) => this.send(m));
+      const started = Date.now();
 
       // msg.action (with Dynamic control on) acts on the connection and does no PLC I/O
       if (await handleConnectionAction(serverNode, msg, send, done)) return;
+
+      // The input message passed on, with msg.s7 for this write
+      const sendWritten = (extra: S7MsgDetailsExtra) =>
+        send({ ...msg, s7: s7Details(serverNode, 'write', started, extra) } as NodeMessage);
 
       try {
         const mode = config.mode || 'single';
@@ -87,7 +96,13 @@ export = function (RED: NodeAPI): void {
           });
 
           await serverNode.connectionManager.write(items);
-          send(msg);
+          // The addresses are msg.payload's keys
+          const addresses = Object.fromEntries(entries.map(([addr]) => [addr, addr]));
+          sendWritten({
+            source: 'msg.payload',
+            address: entries.length === 1 ? entries[0][0] : undefined,
+            addresses,
+          });
           done();
           return;
         }
@@ -202,7 +217,7 @@ export = function (RED: NodeAPI): void {
           });
 
           await serverNode.connectionManager.write(items);
-          send(msg);
+          sendWritten({ source, address: addressStr });
           done();
           return;
         }
@@ -244,7 +259,7 @@ export = function (RED: NodeAPI): void {
         await serverNode.connectionManager.write(items);
 
         // Pass-through on success
-        send(msg);
+        sendWritten({ source, address: addressStr });
         done();
       } catch (err) {
         done(err instanceof Error ? err : new Error(String(err)));

@@ -225,6 +225,12 @@
     <dd>Enumerated addresses with current values</dd>
     <dt class="optional">payload.cpuInfo <span class="property-type">object</span></dt>
     <dd>CPU information (snap7 backend only)</dd>
+    <dt>s7 <span class="property-type">object</span></dt>
+    <dd><code>op</code> (<code>"browse"</code>), <code>server</code> (the <code>s7-config</code>'s name, or
+    host:port), <code>timestamp</code> (when the message was sent, ms since 1970) and
+    <code>durationMs</code>, the same details <code>s7-read</code> and <code>s7-write</code> send. With the CFG
+    source there is no PLC, so <code>server</code> is left out. Any <code>msg.s7</code> on the input
+    message is replaced.</dd>
   </dl>
   <h3>Outputs (CFG source)</h3>
   <dl class="message-properties">
