@@ -1,4 +1,5 @@
 import { Poller } from '../../../src/core/poller';
+import { S7Error, S7ErrorCode } from '../../../src/utils/error-codes';
 
 describe('Poller', () => {
   let poller: Poller;
@@ -198,7 +199,7 @@ describe('Poller', () => {
       return read;
     };
 
-    it('does not emit error, so a closed s7-trigger with no listeners cannot crash the process', async () => {
+    it('does not emit error once its listeners are gone, so a closed s7-trigger cannot crash the process', async () => {
       poller = new Poller({ interval: 1000, edgeMode: 'any', deadband: 0 });
       poller.addItem('test');
       const read = pendingRead(poller);
@@ -212,6 +213,23 @@ describe('Poller', () => {
       read.reject(new Error('Connection lost'));
       await expect(polling).resolves.toBeUndefined();
       expect(emit).not.toHaveBeenCalled();
+    });
+
+    it('still reports the error when the failure itself stopped the poller', async () => {
+      // As ConnectionManager.processQueue() does: it rejects the timed-out request, then
+      // handleConnectionLoss() moves to reconnecting and s7-trigger stops the poller, all in the
+      // same tick and before the poll sees the rejection
+      poller = new Poller({ interval: 1000, edgeMode: 'any', deadband: 0 });
+      poller.addItem('test');
+      const read = pendingRead(poller);
+      const onError = jest.fn();
+      poller.on('error', onError);
+      poller.start();
+      const polling = poll(poller);
+      read.reject(new S7Error(S7ErrorCode.REQUEST_TIMEOUT, 'Request timed out'));
+      poller.stop();
+      await polling;
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'Request timed out' }));
     });
 
     it('ignores its values, even after the poller has started again', async () => {
