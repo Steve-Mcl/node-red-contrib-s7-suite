@@ -2,10 +2,10 @@ import { S7ConfigNode } from '../s7-config/s7-config-types';
 
 /** What an S7 node did, sent as msg.s7 with its output. The same shape on every node. */
 export interface S7MsgDetails {
-  /** read, write or trigger, or the msg.action that ran: connect, disconnect, reconnect, status */
+  /** read, write, trigger, control or browse, or "status" on a msg.action status reply */
   op: string;
-  /** The s7-config's name, or host:port when it has none */
-  server: string;
+  /** The s7-config's name, or host:port when it has none. Left out when no PLC was involved. */
+  server?: string;
   /** Where the address came from: "config" (set in the node) or the property, e.g. "flow.plc.address" */
   source?: string;
   /** The address, when one address was read or written */
@@ -31,15 +31,18 @@ export function serverLabel(serverNode: S7ConfigNode): string {
   return cfg ? `${cfg.host}:${cfg.port}` : '';
 }
 
-/** Builds msg.s7 for an operation that started at `started` (Date.now()) and is sending now. */
+/**
+ * Builds msg.s7 for an operation that started at `started` (Date.now()) and is sending now.
+ * Pass null for serverNode when no PLC was involved (s7-browse reading a .cfg file).
+ */
 export function s7Details(
-  serverNode: S7ConfigNode, op: string, started: number, extra: S7MsgDetailsExtra = {},
+  serverNode: S7ConfigNode | null, op: string, started: number, extra: S7MsgDetailsExtra = {},
 ): S7MsgDetails {
   const timestamp = Date.now();
   // Only the fields that apply, in a fixed order so the debug sidebar reads the same every time
   return {
     op,
-    server: serverLabel(serverNode),
+    ...(serverNode && { server: serverLabel(serverNode) }),
     ...(extra.source !== undefined && { source: extra.source }),
     ...(extra.address !== undefined && { address: extra.address }),
     ...(extra.addresses !== undefined && { addresses: extra.addresses }),

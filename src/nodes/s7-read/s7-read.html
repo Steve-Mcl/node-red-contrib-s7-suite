@@ -694,8 +694,8 @@
     Choosing <code>msg</code> starts from <code>msg.schema</code>.</dd>
     <dt class="optional">action <span class="property-type">string</span></dt>
     <dd>With <b>Dynamic control</b> on in the <code>s7-config</code>: <code>connect</code>, <code>disconnect</code>,
-    <code>reconnect</code> or <code>status</code>. The message then acts on the connection instead of reading.
-    When it has finished, the message is sent on with the connection report as <code>msg.payload</code> and the action as <code>msg.s7.op</code>. See the <code>s7-config</code> help.
+    <code>reconnect</code> or <code>status</code>. The message then acts on the connection instead of reading;
+    <code>status</code> sends the connection report as <code>msg.payload</code>. See the <code>s7-config</code> help.
     Ignored while Dynamic control is off.</dd>
   </dl>
   <h3>Outputs</h3>

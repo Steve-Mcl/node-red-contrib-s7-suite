@@ -8,6 +8,7 @@ import { readValue } from '../../core/data-converter';
 import { statusForState } from '../shared/status-helper';
 import { parseCfg, CfgParseResult } from '../../core/cfg-parser';
 import { handleConnectionAction } from '../shared/connection-action';
+import { s7Details } from '../shared/msg-details';
 
 interface S7BrowseNodeDef extends NodeDef {
   server: string;
@@ -50,6 +51,7 @@ export = function (RED: NodeAPI): void {
 
       this.on('input', (msg: NodeMessage, _send, done) => {
         const send = _send || ((m: NodeMessage) => this.send(m));
+        const started = Date.now();
         let payloadParsed: CfgParseResult | null = cached;
         const msgContent = (msg as Record<string, unknown>).cfgContent;
         if (typeof msgContent === 'string' && msgContent.trim()) {
@@ -64,7 +66,8 @@ export = function (RED: NodeAPI): void {
           done(new Error('No .cfg loaded — upload one in the node editor or send msg.cfgContent'));
           return;
         }
-        send({ ...msg, payload: payloadParsed } as NodeMessage);
+        // No PLC involved, so msg.s7 has no server
+        send({ ...msg, payload: payloadParsed, s7: s7Details(null, 'browse', started) } as NodeMessage);
         done();
       });
 
@@ -92,6 +95,7 @@ export = function (RED: NodeAPI): void {
 
     this.on('input', async (msg: NodeMessage, _send, done) => {
       const send = _send || ((m: NodeMessage) => this.send(m));
+      const started = Date.now();
 
       // msg.action (with Dynamic control on) acts on the connection and does no PLC I/O
       if (await handleConnectionAction(serverNode, msg, send, done)) return;
@@ -139,7 +143,7 @@ export = function (RED: NodeAPI): void {
           );
         }
 
-        send({ ...msg, payload: result } as NodeMessage);
+        send({ ...msg, payload: result, s7: s7Details(serverNode, 'browse', started) } as NodeMessage);
         done();
       } catch (err) {
         done(err instanceof Error ? err : new Error(String(err)));

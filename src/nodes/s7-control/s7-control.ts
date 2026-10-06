@@ -2,6 +2,7 @@ import { NodeAPI, Node, NodeDef, NodeMessage } from 'node-red';
 import { S7ConfigNode } from '../s7-config/s7-config-types';
 import { createStatusUpdater } from '../shared/status-helper';
 import { handleConnectionAction } from '../shared/connection-action';
+import { s7Details } from '../shared/msg-details';
 
 type ControlAction = 'start' | 'stop' | 'coldstart' | 'reset';
 
@@ -29,6 +30,7 @@ export = function (RED: NodeAPI): void {
 
     this.on('input', async (msg: NodeMessage, _send, done) => {
       const send = _send || ((m: NodeMessage) => this.send(m));
+      const started = Date.now();
 
       // msg.action (with Dynamic control on) acts on the connection and does no PLC I/O
       if (await handleConnectionAction(serverNode, msg, send, done)) return;
@@ -63,6 +65,8 @@ export = function (RED: NodeAPI): void {
         await backend[methodName]!();
 
         msg.payload = { action, success: true };
+        // Replaces any msg.s7 from an earlier S7 node, which would describe that node's work
+        (msg as Record<string, unknown>).s7 = s7Details(serverNode, 'control', started);
         send(msg);
         done();
       } catch (err) {

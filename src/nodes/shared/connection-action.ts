@@ -12,8 +12,7 @@ export type ConnectionAction = typeof CONNECTION_ACTIONS[number];
  * feature on is the only thing that can change how an existing flow behaves.
  *
  * Returns true when the message was an action (done has been called, success or not), so the
- * caller must stop; false to carry on with its normal work. An action does no PLC I/O. A finished
- * action sends the message on with the connection report; a failed one only reports the error.
+ * caller must stop; false to carry on with its normal work. An action does no PLC I/O.
  */
 export async function handleConnectionAction(
   serverNode: S7ConfigNode,
@@ -34,8 +33,16 @@ export async function handleConnectionAction(
   const connection = serverNode.connectionManager;
   try {
     switch (action as ConnectionAction) {
-      case 'status':
+      case 'status': {
+        const out: Record<string, unknown> = {
+          ...msg,
+          payload: serverNode.getStatus(),
+          s7: s7Details(serverNode, 'status', started),
+        };
+        delete out.action;
+        send(out as NodeMessage);
         break;
+      }
       case 'disconnect':
         await connection.disconnect();
         break;
@@ -46,16 +53,6 @@ export async function handleConnectionAction(
         await (action === 'connect' ? connection.connect() : connection.reconnect());
         break;
     }
-    // Every action sends the message on once it has finished, with the connection report as it is
-    // now. msg.action is dropped so the reply can't act again on the next S7 node; msg.s7.op says
-    // which action it was.
-    const out: Record<string, unknown> = {
-      ...msg,
-      payload: serverNode.getStatus(),
-      s7: s7Details(serverNode, action, started),
-    };
-    delete out.action;
-    send(out as NodeMessage);
     done();
   } catch (err) {
     done(err instanceof Error ? err : new Error(String(err)));

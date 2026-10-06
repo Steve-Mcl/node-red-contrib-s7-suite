@@ -119,9 +119,7 @@ A message carrying `msg.action` acts on the connection and does **no** PLC I/O:
 | `connect` | Connects. Already connected is a success; a pending retry is brought forward |
 | `disconnect` | Disconnects and stops retrying until told to connect |
 | `reconnect` | Disconnects, then connects with the retry backoff reset |
-| `status` | Changes nothing, just reports |
-
-When the action has finished, the node sends the message on, without `msg.action`, with `msg.payload` set to the connection report as it is then (below) and `msg.s7` set to `{ op, server, timestamp, durationMs }`, where `op` is the action. So a flow can wait for a `connect` to finish, then carry on.
+| `status` | Sends the message on with `msg.payload` set to the connection report (below) and `msg.s7` to `{ op: "status", server, timestamp, durationMs }` |
 
 ```json
 {
@@ -133,11 +131,11 @@ When the action has finished, the node sends the message on, without `msg.action
 }
 ```
 
-`state` is `connected`, `connecting`, `reconnecting`, `error` or `disconnected`, and `since` is when it entered that state. `lastError` is the most recent connect failure or lost link, kept after the connection recovers. The action affects the connection, so every node using that `s7-config` sees the result. A failed `connect` or `reconnect`, or an unknown action, is reported as the node's error, so a Catch node can handle it, and nothing is sent.
+`state` is `connected`, `connecting`, `reconnecting`, `error` or `disconnected`, and `since` is when it entered that state. `lastError` is the most recent connect failure or lost link, kept after the connection recovers. The action affects the connection, so every node using that `s7-config` sees the result. A failed `connect` or `reconnect`, or an unknown action, is reported as the node's error, so a Catch node can handle it. `connect`, `disconnect` and `reconnect` send nothing on: to carry on once one has finished, use a Complete node. Wire a `status` reply to a debug or switch node rather than straight into another S7 node, which would treat it as an ordinary message to read or write with.
 
 ### Output details (`msg.s7`)
 
-`s7-read`, `s7-write` and `s7-trigger` add `msg.s7` to every message they send, with the same shape on each, so a switch, log or database node can use it whatever S7 node the message came from:
+Every S7 node adds `msg.s7` to the messages it sends, with the same shape on each, so a switch, log or database node can use it whatever S7 node the message came from:
 
 ```json
 {
@@ -152,15 +150,15 @@ When the action has finished, the node sends the message on, without `msg.action
 
 | Property | Description |
 |---|---|
-| `op` | `read`, `write` or `trigger`, or the `msg.action` that ran (`connect`, `disconnect`, `reconnect`, `status`) |
-| `server` | The `s7-config`'s name, or `host:port` when it has none |
+| `op` | `read`, `write`, `trigger`, `control` or `browse`, or `status` on the reply to `msg.action` `status` |
+| `server` | The `s7-config`'s name, or `host:port` when it has none. Left out when `s7-browse` reads a `.cfg` file |
 | `source` | Where the address came from: `config` (set in the node), `msg.payload` (`s7-write` multi-write), or the property, such as `flow.plc.addresses` or `env.PLC_ADDRESS` |
 | `address` | The address, when one was read or written (the base address for struct mode) |
 | `addresses` | When `msg.payload` is keyed by label or address (`s7-read` object output or several addresses, `s7-write` multi-write), the same keys, each with its address |
 | `timestamp` | When the message was sent, in ms since 1970 |
 | `durationMs` | From the message arriving to it being sent. For `s7-trigger`, from the start of the poll that saw the change |
 
-A property that doesn't apply is left out. Any `msg.s7` on the input message is replaced. Action replies have only `op`, `server`, `timestamp` and `durationMs`.
+A property that doesn't apply is left out. Any `msg.s7` on the input message is replaced. `s7-control`, `s7-browse` and the `status` reply have only `op`, `server`, `timestamp` and `durationMs`.
 
 ### Node API
 
@@ -214,7 +212,7 @@ The node has no input: it starts polling once the PLC is connected, and is confi
 
 #### s7-browse
 
-Send any message to trigger. Output `msg.payload` contains `{ blocks, areas, addresses, cpuInfo? }`.
+Send any message to trigger. Output `msg.payload` contains `{ blocks, areas, addresses, cpuInfo? }`. Output `msg.s7` is `{ op: "browse", server, timestamp, durationMs }` ([Output details](#output-details-msgs7)).
 
 #### s7-control
 
@@ -222,6 +220,7 @@ Send any message to trigger. Output `msg.payload` contains `{ blocks, areas, add
 |----------|------|-------------|
 | `msg.payload` | string | Input: action override (`start`, `stop`, `coldstart`, `reset`) |
 | `msg.payload` | object | Output: `{ action, success: true }` |
+| `msg.s7` | object | Output: `{ op: "control", server, timestamp, durationMs }` ([Output details](#output-details-msgs7)) |
 
 Requires the **snap7** backend. Send a message to execute the configured action, or override via `msg.payload`.
 

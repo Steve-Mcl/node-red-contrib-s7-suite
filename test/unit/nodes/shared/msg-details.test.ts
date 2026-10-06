@@ -26,6 +26,11 @@ describe('msg.s7 details', () => {
     });
   });
 
+  it('leaves out the server when no PLC was involved', () => {
+    jest.spyOn(Date, 'now').mockReturnValue(1005);
+    expect(s7Details(null, 'browse', 1000)).toEqual({ op: 'browse', timestamp: 1005, durationMs: 5 });
+  });
+
   it('leaves out a field given as undefined', () => {
     const details = s7Details(server({ name: 'PLC' }), 'read', Date.now(), { source: 'config', address: undefined });
     expect('address' in details).toBe(false);

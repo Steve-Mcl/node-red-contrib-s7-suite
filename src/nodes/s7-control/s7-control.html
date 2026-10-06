@@ -55,14 +55,19 @@
     <dd>Overrides the configured action. Valid values: <code>start</code>, <code>stop</code>, <code>coldstart</code>, <code>reset</code></dd>
     <dt class="optional">action <span class="property-type">string</span></dt>
     <dd>With <b>Dynamic control</b> on in the <code>s7-config</code>: <code>connect</code>, <code>disconnect</code>,
-    <code>reconnect</code> or <code>status</code>. The message then acts on the connection instead of running its PLC command.
-    When it has finished, the message is sent on with the connection report as <code>msg.payload</code> and the action as <code>msg.s7.op</code>. See the <code>s7-config</code> help.
+    <code>reconnect</code> or <code>status</code>. The message then acts on the connection instead of running its PLC command;
+    <code>status</code> sends the connection report as <code>msg.payload</code>. See the <code>s7-config</code> help.
     Ignored while Dynamic control is off.</dd>
   </dl>
   <h3>Outputs</h3>
   <dl class="message-properties">
     <dt>payload <span class="property-type">object</span></dt>
     <dd>Result object with <code>action</code> and <code>success</code> properties</dd>
+    <dt>s7 <span class="property-type">object</span></dt>
+    <dd><code>op</code> (<code>"control"</code>), <code>server</code> (the <code>s7-config</code>'s name, or
+    host:port), <code>timestamp</code> (when the message was sent, ms since 1970) and
+    <code>durationMs</code>, the same details <code>s7-read</code> and <code>s7-write</code> send. Any
+    <code>msg.s7</code> on the input message is replaced.</dd>
   </dl>
   <h3>Details</h3>
   <p>This node sends CPU control commands to the PLC. The action can be configured in the node properties or overridden at runtime via <code>msg.payload</code>.</p>

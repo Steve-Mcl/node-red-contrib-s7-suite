@@ -28,6 +28,7 @@ describe('s7-browse node', () => {
       plcType: 'S7-1200', backend: backendType,
     });
     return {
+      name: 'PLC 1',
       connectionManager: connManager,
       s7Config: { backend: backendType },
       registerChildNode: jest.fn(),
@@ -182,7 +183,8 @@ describe('s7-browse node', () => {
         maxDbNumber: 1,
       });
 
-      const msg = { _msgid: '123', payload: null };
+      // msg.s7 from an earlier S7 node is replaced, not passed on
+      const msg = { _msgid: '123', payload: null, s7: { op: 'read', address: 'DB1,INT0' } };
       const send = jest.fn();
       const done = jest.fn();
 
@@ -194,6 +196,9 @@ describe('s7-browse node', () => {
       const result = send.mock.calls[0][0].payload;
       expect(result).toHaveProperty('blocks');
       expect(result).toHaveProperty('areas');
+      expect(send.mock.calls[0][0].s7).toEqual({
+        op: 'browse', server: 'PLC 1', timestamp: expect.any(Number), durationMs: expect.any(Number),
+      });
       expect(done).toHaveBeenCalledWith();
     });
 
@@ -505,6 +510,8 @@ describe('s7-browse node', () => {
       const out = send.mock.calls[0][0].payload;
       expect(out.tags).toHaveLength(1);
       expect(out.tags[0].name).toBe('NA_INT');
+      // No PLC involved, so no server
+      expect(send.mock.calls[0][0].s7).toEqual({ op: 'browse', timestamp: expect.any(Number), durationMs: expect.any(Number) });
       expect(done).toHaveBeenCalledWith();
     });
 

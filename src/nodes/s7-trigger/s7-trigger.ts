@@ -93,12 +93,15 @@ export = function (RED: NodeAPI): void {
       poller.addItem(item.name);
     }
 
-    // When the current poll started, so msg.s7.durationMs covers the read that saw the change
+    // When the poll that saw the change started, for msg.s7.durationMs. Each read keeps its own
+    // start and records it only once it has finished, just before the poller sends that read's
+    // changes, so a later poll that started while this one was waiting can't shorten it.
     let pollStarted = Date.now();
 
     poller.setReadFunction(async () => {
-      pollStarted = Date.now();
+      const started = Date.now();
       const results: S7ReadResult[] = await serverNode.connectionManager.read(items);
+      pollStarted = started;
       const map = new Map<string, unknown>();
       for (const r of results) {
         map.set(r.name, r.value);

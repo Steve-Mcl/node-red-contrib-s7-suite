@@ -280,6 +280,32 @@ describe('s7-trigger node', () => {
       expect(sent[0].s7).toEqual(details('DB1,REAL0'));
     });
 
+    it('times a slow read from its own start, not from a poll that started while it waited', async () => {
+      jest.useRealTimers();
+      // The first read takes 250 ms; polls keep starting every 50 ms behind it
+      let calls = 0;
+      const realRead = mockBackend.read.bind(mockBackend);
+      mockBackend.read = async (items) => {
+        calls++;
+        if (calls === 1) await new Promise((resolve) => setTimeout(resolve, 250));
+        return realRead(items);
+      };
+      mockBackend.readValues = { item_0: 10 };
+
+      const node = createNodeContext();
+      constructorFn.call(node, {
+        id: 'trigger1', type: 's7-trigger', server: 'config1', address: 'DB1,REAL0',
+        interval: 50, edgeMode: 'any', deadband: 0,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (node as any).listeners('close')[0](() => {});
+
+      // Only the first read changes the value, so there is one message, timed from that read's start
+      expect(node.send).toHaveBeenCalledTimes(1);
+      expect(node.send.mock.calls[0][0].s7.durationMs).toBeGreaterThanOrEqual(240);
+    });
+
     it('stops poller on reconnecting state', () => {
       const node = createNodeContext();
 

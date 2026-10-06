@@ -211,8 +211,8 @@
     <dd><b>CFG source only:</b> raw contents of a STEP 7 .cfg file to parse at runtime (overrides the preloaded file)</dd>
     <dt class="optional">action <span class="property-type">string</span></dt>
     <dd>With <b>Dynamic control</b> on in the <code>s7-config</code>: <code>connect</code>, <code>disconnect</code>,
-    <code>reconnect</code> or <code>status</code>. The message then acts on the connection instead of browsing (live source).
-    When it has finished, the message is sent on with the connection report as <code>msg.payload</code> and the action as <code>msg.s7.op</code>. See the <code>s7-config</code> help.
+    <code>reconnect</code> or <code>status</code>. The message then acts on the connection instead of browsing (live source);
+    <code>status</code> sends the connection report as <code>msg.payload</code>. See the <code>s7-config</code> help.
     Ignored while Dynamic control is off.</dd>
   </dl>
   <h3>Outputs (live source)</h3>
@@ -225,6 +225,12 @@
     <dd>Enumerated addresses with current values</dd>
     <dt class="optional">payload.cpuInfo <span class="property-type">object</span></dt>
     <dd>CPU information (snap7 backend only)</dd>
+    <dt>s7 <span class="property-type">object</span></dt>
+    <dd><code>op</code> (<code>"browse"</code>), <code>server</code> (the <code>s7-config</code>'s name, or
+    host:port), <code>timestamp</code> (when the message was sent, ms since 1970) and
+    <code>durationMs</code>, the same details <code>s7-read</code> and <code>s7-write</code> send. With the CFG
+    source there is no PLC, so <code>server</code> is left out. Any <code>msg.s7</code> on the input
+    message is replaced.</dd>
   </dl>
   <h3>Outputs (CFG source)</h3>
   <dl class="message-properties">

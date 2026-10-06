@@ -180,12 +180,8 @@ describe('s7-write node', () => {
       await (node as any).listeners('input')[0]({ _msgid: '1', action: 'disconnect', payload: 1.5 }, send, done);
       expect(connManager.getState()).toBe('disconnected');
       expect(mockBackend.writeCalls).toHaveLength(0);
-      // Sent on once disconnected, with the report and msg.s7 but without msg.action
-      expect(send).toHaveBeenCalledWith({
-        _msgid: '1',
-        payload: expect.objectContaining({ state: 'disconnected' }),
-        s7: { op: 'disconnect', server: 'PLC 1', timestamp: expect.any(Number), durationMs: expect.any(Number) },
-      });
+      // Nothing is sent on, so a reply can't reach the next S7 node as an ordinary message
+      expect(send).not.toHaveBeenCalled();
       expect(done).toHaveBeenCalledWith();
     });
 
