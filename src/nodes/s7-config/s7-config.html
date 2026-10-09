@@ -350,6 +350,11 @@
       if (node.autoConnect === undefined) {
         $('#node-config-input-autoConnect').prop('checked', true);
       }
+      // Config nodes saved before the LINT/ULINT setting existed read them as numbers (what the
+      // runtime does when it's unset); select that rather than leaving the dropdown blank
+      if (node.int64As === undefined) {
+        $('#node-config-input-int64As').val('number');
+      }
 
       var plcDefaults = {};
       $.getJSON('s7-suite/plc-defaults', function (data) {

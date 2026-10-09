@@ -79,4 +79,8 @@
   </ul>
   <h4>Backend Requirement</h4>
   <p><b>snap7 backend only.</b> The nodes7 backend does not support CPU control operations. If the current backend does not support the requested action, the node will report an error.</p>
+  <h4>S7-1200 and S7-1500</h4>
+  <p>These CPUs usually refuse stop and start over PUT/GET: the node reports the PLC's answer
+  ("CPU : Cannot stop PLC" or "CPU : Cannot start PLC") as an error and the CPU stays in its current
+  mode. The commands work on S7-300 and S7-400 CPUs.</p>
 </script>
