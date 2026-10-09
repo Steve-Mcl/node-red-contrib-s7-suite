@@ -119,7 +119,8 @@
     <dt>topic <span class="property-type">string</span></dt>
     <dd>The address that changed</dd>
     <dt>oldValue <span class="property-type">any</span></dt>
-    <dd>The previous value before the change</dd>
+    <dd>The previous value: for a boolean, the value at the previous poll; for a number with a
+    deadband, the value last sent. Not set on the first message.</dd>
     <dt>s7 <span class="property-type">object</span></dt>
     <dd>The same details as <code>s7-read</code> and <code>s7-write</code> send: <code>op</code>
     (<code>"trigger"</code>), <code>server</code> (the <code>s7-config</code>'s name, or host:port),
@@ -141,13 +142,18 @@
   usable number, stops the node with an error rather than falling back to a default.</p>
   <h4>Edge Mode</h4>
   <ul>
-    <li><b>Any change:</b> Triggers on any value change (default)</li>
-    <li><b>Rising edge:</b> Triggers only when a boolean changes from false to true</li>
-    <li><b>Falling edge:</b> Triggers only when a boolean changes from true to false</li>
+    <li><b>Any change:</b> Triggers on any value change (default). The first poll sends the starting value.</li>
+    <li><b>Rising edge:</b> Triggers each time a boolean changes from false to true</li>
+    <li><b>Falling edge:</b> Triggers each time a boolean changes from true to false</li>
   </ul>
+  <p>In rising and falling mode the first poll of a boolean only records its starting value and sends
+  nothing, because a starting value is not an edge. Other types trigger as in <b>Any change</b>, and
+  their first poll is sent.</p>
   <h4>Deadband</h4>
-  <p>For numeric values, the minimum absolute change required to trigger a message, 0 or more
-  (fractions allowed). Set to 0 to trigger on any change. Useful for filtering noise on analog signals.</p>
+  <p>For numeric values, the smallest absolute change that sends a message, 0 or more (fractions
+  allowed). The change is measured from the value last sent, so a slow drift still triggers once it
+  adds up to the deadband: with a deadband of 5, 10 then 13 then 16 sends 10 and 16. Set to 0 to
+  trigger on any change. Useful for filtering noise on analog signals.</p>
   <h4>Multiple Addresses</h4>
   <p>Enter multiple addresses separated by spaces or semicolons. Each address is
   monitored independently and sends separate messages when changed.</p>

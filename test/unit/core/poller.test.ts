@@ -11,7 +11,7 @@ describe('Poller', () => {
     // hasChanged() is private; call it directly rather than wait on timers
     const changed = (p: Poller, oldValue: unknown, newValue: unknown): boolean =>
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (p as any).hasChanged({ lastValue: oldValue }, newValue);
+      (p as any).hasChanged(oldValue, newValue);
 
     it('compares dates by the time they hold, not by object', () => {
       poller = new Poller({ interval: 50, edgeMode: 'any', deadband: 0 });
@@ -34,6 +34,7 @@ describe('Poller', () => {
       poller = new Poller({ interval: 50, edgeMode: 'any', deadband: 5 });
       expect(changed(poller, 9007199254740993n, 9007199254740996n)).toBe(false);
       expect(changed(poller, 9007199254740993n, 9007199254741000n)).toBe(true);
+      expect(changed(poller, 9007199254740993n, 9007199254740998n)).toBe(true); // exactly the deadband
     });
   });
 
@@ -90,85 +91,78 @@ describe('Poller', () => {
     }, 250);
   });
 
-  it('respects rising edge mode', (done) => {
-    let callCount = 0;
-    poller = new Poller({ interval: 50, edgeMode: 'rising', deadband: 0 });
-    poller.addItem('test');
-    // Sequence: false, true, false, true
-    const sequence = [false, true, false, true];
-    poller.setReadFunction(async () => {
-      const val = sequence[Math.min(callCount++, sequence.length - 1)];
-      return new Map([['test', val]]);
+  describe('edges and deadband', () => {
+    // One poll per value, without timers, so each test sees exactly what each read sends
+    async function sendsFor(p: Poller, sequence: unknown[]): Promise<{ value: unknown; oldValue: unknown }[]> {
+      const sent: { value: unknown; oldValue: unknown }[] = [];
+      p.on('changed', ({ value, oldValue }) => sent.push({ value, oldValue }));
+      p.addItem('test');
+      let i = 0;
+      p.setReadFunction(async () => new Map([['test', sequence[i++]]]));
+      for (let n = 0; n < sequence.length; n++) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (p as any).poll();
+      }
+      return sent;
+    }
+
+    it('fires on every rising edge, not on the first poll', async () => {
+      poller = new Poller({ interval: 50, edgeMode: 'rising', deadband: 0 });
+      const sent = await sendsFor(poller, [false, true, false, true, false, true]);
+      expect(sent).toEqual([
+        { value: true, oldValue: false },
+        { value: true, oldValue: false },
+        { value: true, oldValue: false },
+      ]);
     });
 
-    const changes: boolean[] = [];
-    poller.on('changed', ({ value }) => {
-      changes.push(value as boolean);
+    it('fires on every falling edge, not on the first poll', async () => {
+      poller = new Poller({ interval: 50, edgeMode: 'falling', deadband: 0 });
+      const sent = await sendsFor(poller, [true, false, true, false, true, false]);
+      expect(sent).toEqual([
+        { value: false, oldValue: true },
+        { value: false, oldValue: true },
+        { value: false, oldValue: true },
+      ]);
     });
 
-    setTimeout(() => {
-      poller.stop();
-      // Should have: initial false, then rising to true (x2 possibly)
-      expect(changes[0]).toBe(false); // first read
-      const risingEdges = changes.filter((v, i) => i > 0 && v === true);
-      expect(risingEdges.length).toBeGreaterThanOrEqual(1);
-      done();
-    }, 400);
-
-    poller.start();
-  });
-
-  it('respects falling edge mode', (done) => {
-    let callCount = 0;
-    poller = new Poller({ interval: 50, edgeMode: 'falling', deadband: 0 });
-    poller.addItem('test');
-    const sequence = [true, false, true, false];
-    poller.setReadFunction(async () => {
-      const val = sequence[Math.min(callCount++, sequence.length - 1)];
-      return new Map([['test', val]]);
+    it('does not treat a first true as a rising edge, or a first false as a falling edge', async () => {
+      poller = new Poller({ interval: 50, edgeMode: 'rising', deadband: 0 });
+      expect(await sendsFor(poller, [true, true])).toEqual([]);
+      poller = new Poller({ interval: 50, edgeMode: 'falling', deadband: 0 });
+      expect(await sendsFor(poller, [false, false])).toEqual([]);
     });
 
-    const changes: boolean[] = [];
-    poller.on('changed', ({ value }) => {
-      changes.push(value as boolean);
+    it('sends the first boolean and every change in any mode', async () => {
+      poller = new Poller({ interval: 50, edgeMode: 'any', deadband: 0 });
+      const sent = await sendsFor(poller, [false, false, true, false]);
+      expect(sent).toEqual([
+        { value: false, oldValue: undefined },
+        { value: true, oldValue: false },
+        { value: false, oldValue: true },
+      ]);
     });
 
-    setTimeout(() => {
-      poller.stop();
-      expect(changes[0]).toBe(true); // first read
-      const fallingEdges = changes.filter((v, i) => i > 0 && v === false);
-      expect(fallingEdges.length).toBeGreaterThanOrEqual(1);
-      done();
-    }, 400);
-
-    poller.start();
-  });
-
-  it('respects deadband for numeric values', (done) => {
-    let callCount = 0;
-    poller = new Poller({ interval: 50, edgeMode: 'any', deadband: 5 });
-    poller.addItem('test');
-    // Values: 10, 12, 16 (within deadband=5: no change from 10 to 12, change from 10 to 16)
-    const sequence = [10, 12, 16];
-    poller.setReadFunction(async () => {
-      const val = sequence[Math.min(callCount++, sequence.length - 1)];
-      return new Map([['test', val]]);
+    it('measures the deadband from the value last sent, so a slow drift fires', async () => {
+      poller = new Poller({ interval: 50, edgeMode: 'any', deadband: 5 });
+      const sent = await sendsFor(poller, [10, 13, 16]);
+      expect(sent).toEqual([
+        { value: 10, oldValue: undefined },
+        { value: 16, oldValue: 10 },
+      ]);
     });
 
-    const changes: number[] = [];
-    poller.on('changed', ({ value }) => {
-      changes.push(value as number);
+    it('fires on a change of exactly the deadband', async () => {
+      poller = new Poller({ interval: 50, edgeMode: 'any', deadband: 5 });
+      const sent = await sendsFor(poller, [10, 14, 15]);
+      expect(sent.map((s) => s.value)).toEqual([10, 15]);
     });
 
-    setTimeout(() => {
-      poller.stop();
-      expect(changes).toContain(10); // initial
-      expect(changes).toContain(16); // exceeds deadband
-      expect(changes).not.toContain(12); // within deadband
-      done();
-    }, 400);
-
-    poller.start();
+    it('fires on any numeric change with a deadband of 0', async () => {
+      poller = new Poller({ interval: 50, edgeMode: 'any', deadband: 0 });
+      const sent = await sendsFor(poller, [10, 10, 10.5, 11]);
+      expect(sent.map((s) => s.value)).toEqual([10, 10.5, 11]);
+    });
   });
 
   it('stops polling', () => {
