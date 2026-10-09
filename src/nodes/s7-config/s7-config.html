@@ -76,7 +76,9 @@
     function fetchAndRenderBrowse() {
       var serverId = $(opts.serverId).val();
       if (!serverId) { RED.notify('Select a server first', 'warning'); return; }
-      $(opts.statusId).text('Browsing...').css('color', '#666').show();
+      // Colours go in the markup: jQuery UI's colour hooks turn css('color', 'var(...)') into
+      // the fallback, which ignores the editor theme
+      $(opts.statusId).text('Browsing...').show();
       $(opts.resultsId).empty();
       $(opts.dialogId).show();
       resize();
@@ -153,10 +155,10 @@
 
             // Category header (collapsible)
             var section = $('<div style="margin-bottom:2px;"></div>');
-            var header = $('<div style="background:#e3f2fd;padding:4px 8px;cursor:pointer;border-radius:3px;font-weight:bold;font-size:12px;display:flex;align-items:center;user-select:none;"></div>');
+            var header = $('<div style="background:var(--red-ui-secondary-background-selected, #e3f2fd);padding:4px 8px;cursor:pointer;border-radius:3px;font-weight:bold;font-size:12px;display:flex;align-items:center;user-select:none;"></div>');
             var arrow = $('<i class="fa fa-caret-right" style="margin-right:6px;width:10px;transition:transform 0.2s;"></i>');
             header.append(arrow);
-            header.append('<span>' + cat + ' <span style="color:#888;font-weight:normal;">(' + filtered.length + ')</span></span>');
+            header.append('<span>' + cat + ' <span style="color:var(--red-ui-tertiary-text-color, #888);font-weight:normal;">(' + filtered.length + ')</span></span>');
             section.append(header);
 
             var body = $('<div style="display:none;"></div>');
@@ -166,21 +168,22 @@
             filtered.forEach(function (a) {
               if (shown++ >= 100) return;
               totalCount++;
-              var tr = $('<tr style="border-bottom:1px solid #eee;cursor:pointer;"></tr>');
-              tr.on('mouseover', function () { $(this).css('background', '#f5f5f5'); });
+              var tr = $('<tr style="border-bottom:1px solid var(--red-ui-secondary-border-color, #eee);cursor:pointer;"></tr>');
+              tr.on('mouseover', function () { $(this).css('background', 'var(--red-ui-list-item-background-hover, #f5f5f5)'); });
               tr.on('mouseout', function () { $(this).css('background', ''); });
               tr.append($('<td style="padding:2px 4px;font-family:monospace;font-size:11px;"></td>').text(a.address));
-              tr.append($('<td style="padding:2px 4px;text-align:center;color:#1565C0;font-size:11px;"></td>').text(a.type));
-              var valTd = $('<td style="padding:2px 4px;text-align:right;font-family:monospace;font-size:11px;white-space:nowrap;"></td>');
+              tr.append($('<td style="padding:2px 4px;text-align:center;color:var(--red-ui-secondary-text-color, #1565C0);font-size:11px;"></td>').text(a.type));
+              var valTd = $('<td style="padding:2px 4px;text-align:right;font-family:monospace;font-size:11px;white-space:nowrap;color:var(--red-ui-primary-text-color, #333);"></td>');
               if (a.value === null || a.value === undefined) {
-                valTd.append($('<span style="color:#999;"></span>').text('-'));
+                valTd.append($('<span style="color:var(--red-ui-tertiary-text-color, #999);"></span>').text('-'));
               } else if (typeof a.value === 'boolean') {
-                valTd.append($('<span></span>').css('color', a.value ? '#4CAF50' : '#F44336').text(String(a.value)));
+                var boolColor = a.value ? 'var(--red-ui-text-color-success, #4CAF50)' : 'var(--red-ui-text-color-error, #F44336)';
+                valTd.append($('<span style="color:' + boolColor + ';"></span>').text(String(a.value)));
               } else if (typeof a.value === 'number') {
                 var numStr = (a.value % 1 !== 0) ? a.value.toFixed(4).replace(/0+$/, '').replace(/\.$/, '') : String(a.value);
-                valTd.css('color', '#333').text(numStr);
+                valTd.text(numStr);
               } else {
-                valTd.css('color', '#333').text(String(a.value));
+                valTd.text(String(a.value));
               }
               tr.append(valTd);
               var btn = $('<button class="red-ui-button red-ui-button-small" style="padding:0 6px;font-size:10px;">Select</button>');
@@ -191,7 +194,7 @@
               tbl.append(tr);
             });
             if (shown > 100) {
-              tbl.append('<tr><td colspan="4" style="padding:4px;color:#999;font-size:11px;">' + (filtered.length - 100) + ' more... use filter</td></tr>');
+              tbl.append('<tr><td colspan="4" style="padding:4px;color:var(--red-ui-tertiary-text-color, #999);font-size:11px;">' + (filtered.length - 100) + ' more... use filter</td></tr>');
             }
             body.append(tbl);
             section.append(body);
@@ -206,7 +209,7 @@
           });
 
           if (totalCount === 0) {
-            container.append('<div style="padding:8px;color:#999;">No matches</div>');
+            container.append('<div style="padding:8px;color:var(--red-ui-tertiary-text-color, #999);">No matches</div>');
           }
           $(opts.resultsId).empty().append(container);
           resize();
@@ -216,7 +219,7 @@
         $(opts.filterId).off('input').on('input', function () { render($(this).val()); });
       }).fail(function (xhr) {
         var msg = xhr.responseJSON ? xhr.responseJSON.error : 'Browse failed';
-        $(opts.statusId).text(msg).css('color', 'red');
+        $(opts.statusId).empty().append($('<span style="color:var(--red-ui-text-color-error, red);"></span>').text(msg));
         resize();
       });
     }
@@ -522,7 +525,7 @@
   <div class="form-row">
     <label for="node-config-input-debug" style="width:auto;"><i class="fa fa-bug"></i> Debug logging</label>
     <input type="checkbox" id="node-config-input-debug" style="display:inline-block; width:auto; vertical-align:top;">
-    <span style="color:#888; font-size:0.85em;">Logs raw protocol traffic (nodes7) to stdout. Leave off for normal use.</span>
+    <span style="color:var(--red-ui-tertiary-text-color, #888); font-size:0.85em;">Logs raw protocol traffic (nodes7) to stdout. Leave off for normal use.</span>
   </div>
   </div>
 </script>
@@ -590,11 +593,11 @@
   <h3>Backends</h3>
   <table style="width:100%;border-collapse:collapse;font-size:13px;">
     <thead>
-      <tr style="background:#e3f2fd;">
-        <th style="padding:4px 8px;text-align:left;border-bottom:2px solid #90CAF9;">Feature</th>
-        <th style="padding:4px 8px;text-align:center;border-bottom:2px solid #90CAF9;">Simulator</th>
-        <th style="padding:4px 8px;text-align:center;border-bottom:2px solid #90CAF9;">nodes7</th>
-        <th style="padding:4px 8px;text-align:center;border-bottom:2px solid #90CAF9;">snap7</th>
+      <tr style="background:var(--red-ui-secondary-background-selected, #e3f2fd);">
+        <th style="padding:4px 8px;text-align:left;border-bottom:2px solid var(--red-ui-tertiary-border-color, #90CAF9);">Feature</th>
+        <th style="padding:4px 8px;text-align:center;border-bottom:2px solid var(--red-ui-tertiary-border-color, #90CAF9);">Simulator</th>
+        <th style="padding:4px 8px;text-align:center;border-bottom:2px solid var(--red-ui-tertiary-border-color, #90CAF9);">nodes7</th>
+        <th style="padding:4px 8px;text-align:center;border-bottom:2px solid var(--red-ui-tertiary-border-color, #90CAF9);">snap7</th>
       </tr>
     </thead>
     <tbody>
