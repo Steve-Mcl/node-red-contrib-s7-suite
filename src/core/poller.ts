@@ -10,7 +10,10 @@ export interface PollerConfig {
 
 export interface PollerItem {
   name: string;
-  lastValue?: unknown;
+  // Every value read, so an edge is measured from the previous read
+  lastSeen?: unknown;
+  // The value last sent, so a deadband is measured from it and a slow drift still fires
+  lastEmitted?: unknown;
 }
 
 export class Poller extends EventEmitter {
@@ -70,10 +73,10 @@ export class Poller extends EventEmitter {
         const item = this.items.get(name);
         if (!item) continue;
 
-        const changed = this.hasChanged(item, value);
-        if (changed) {
-          const oldValue = item.lastValue;
-          item.lastValue = value;
+        const oldValue = typeof value === 'boolean' ? item.lastSeen : item.lastEmitted;
+        item.lastSeen = value;
+        if (this.hasChanged(oldValue, value)) {
+          item.lastEmitted = value;
           this.emit('changed', { name, value, oldValue });
         }
       }
@@ -82,10 +85,12 @@ export class Poller extends EventEmitter {
     }
   }
 
-  private hasChanged(item: PollerItem, newValue: unknown): boolean {
-    if (item.lastValue === undefined) return true;
-
-    const oldVal = item.lastValue;
+  private hasChanged(oldVal: unknown, newValue: unknown): boolean {
+    // First read: send the starting value, except in rising/falling mode, where a boolean's
+    // first value is not an edge
+    if (oldVal === undefined) {
+      return typeof newValue !== 'boolean' || this.config.edgeMode === 'any';
+    }
 
     if (typeof newValue === 'boolean' && typeof oldVal === 'boolean') {
       switch (this.config.edgeMode) {
@@ -100,7 +105,7 @@ export class Poller extends EventEmitter {
 
     if (typeof newValue === 'number' && typeof oldVal === 'number') {
       if (this.config.deadband > 0) {
-        return Math.abs(newValue - oldVal) > this.config.deadband;
+        return Math.abs(newValue - oldVal) >= this.config.deadband;
       }
       return newValue !== oldVal;
     }
@@ -108,7 +113,7 @@ export class Poller extends EventEmitter {
     // LINT/ULINT when the config returns them as BigInt
     if (typeof newValue === 'bigint' && typeof oldVal === 'bigint') {
       if (this.config.deadband > 0) {
-        return Math.abs(Number(newValue - oldVal)) > this.config.deadband;
+        return Math.abs(Number(newValue - oldVal)) >= this.config.deadband;
       }
       return newValue !== oldVal;
     }

@@ -203,8 +203,8 @@ The node has no input: it starts polling once the PLC is connected, and is confi
 | Setting / property | Type | Description |
 |----------|------|-------------|
 | Interval | `num` / `env` | Polling interval in ms, a whole number of 1 or more (default 1000) |
-| Edge mode | select | `any`, `rising` or `falling` (rising and falling apply to booleans) |
-| Deadband | `num` / `env` | Minimum change in a numeric value that triggers a message, 0 or more (default 0) |
+| Edge mode | select | `any`, `rising` or `falling`. Rising and falling apply to booleans and fire on every false to true (or true to false); their first poll of a boolean sends nothing. `any` sends the first value read |
+| Deadband | `num` / `env` | Smallest change in a numeric value, from the value last sent, that triggers a message, 0 or more (default 0) |
 | `msg.payload` | any | Output: new value |
 | `msg.topic` | string | Output: address that changed |
 | `msg.oldValue` | any | Output: previous value |
