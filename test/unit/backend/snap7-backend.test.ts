@@ -462,6 +462,24 @@ describe('Snap7Backend', () => {
       expect(mockWriteArea).not.toHaveBeenCalled();
     });
 
+    it.each([
+      ['BOOL', { area: 'DB', dbNumber: 1, dataType: 'BOOL', offset: 0, bitOffset: 3 }, true],
+      ['STRING', { area: 'DB', dbNumber: 1, dataType: 'STRING', offset: 0, bitOffset: 0 }, 'hi'],
+    ])('reports DISCONNECTED when the link drops between the read and the write of a %s', async (_type, address, value) => {
+      mockReadArea.mockImplementation(
+        (_a: unknown, _d: unknown, _s: unknown, _l: unknown, _w: unknown, cb: Function) => {
+          void backend.disconnect();
+          cb(undefined, Buffer.from([20, 0]));
+        },
+      );
+
+      await expect(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        backend.write([{ name: 'x', address: address as any, value }]),
+      ).rejects.toMatchObject({ code: 'DISCONNECTED', message: 'Not connected' });
+      expect(mockWriteArea).not.toHaveBeenCalled();
+    });
+
     it('throws when not connected', async () => {
       const freshBackend = new Snap7Backend();
       await expect(

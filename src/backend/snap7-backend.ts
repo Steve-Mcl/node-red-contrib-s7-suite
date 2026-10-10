@@ -255,6 +255,11 @@ export class Snap7Backend implements IS7Backend {
   }
 
   private async writeRawArea(area: number, dbNumber: number, start: number, length: number, buffer: Buffer): Promise<void> {
+    // A STRING or BOOL write reads first, so the link can drop before we get here
+    if (!this.client || !this.connected) {
+      throw new S7Error(S7ErrorCode.DISCONNECTED, 'Not connected');
+    }
+
     const client = this.client;
     return new Promise<void>((resolve, reject) => {
       client.WriteArea(area, dbNumber, start, length, 0x02, buffer, (err: Error | undefined) => {
